@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 export interface PendingMutation {
   token: string;
@@ -6,15 +8,52 @@ export interface PendingMutation {
   params: Record<string, unknown>;
   preview: string;
   createdAt: number;
+  safeWord: string;
 }
 
-const TOKEN_TTL_MS = 60_000;
+export const DEFAULT_TOKEN_TTL_SECONDS = 60 * 60;
+function tokenTtlSeconds(): number {
+  const raw = Number(process.env['GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS'] || '');
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+
+  switch (process.env['GOOGLE_ADS_SAFETY_LEVEL'] || 'standard') {
+    case 'strict':
+      return 5 * 60;
+    case 'off':
+    case 'standard':
+    default:
+      return DEFAULT_TOKEN_TTL_SECONDS;
+  }
+}
+
+export function getTokenTtlSeconds(): number {
+  return tokenTtlSeconds();
+}
+
+function tokenTtlMs(): number {
+  return tokenTtlSeconds() * 1000;
+}
 const pending = new Map<string, PendingMutation>();
 
-export function createToken(action: string, params: Record<string, unknown>, preview: string): PendingMutation {
+function getConfigDir(): string {
+  return process.env['CLAUDE_PLUGIN_DATA'] || join(process.env['HOME'] || '/tmp', '.google-ads-baby');
+}
+
+function getSafeWordPath(): string {
+  return join(getConfigDir(), '.gads-safe-word');
+}
+
+function saveSafeWord(word: string) {
+  const dir = getConfigDir();
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(getSafeWordPath(), word);
+}
+
+export function createToken(action: string, params: Record<string, unknown>, preview: string, safeWord: string): PendingMutation {
   const token = randomUUID();
-  const mutation: PendingMutation = { token, action, params, preview, createdAt: Date.now() };
+  const mutation: PendingMutation = { token, action, params, preview, createdAt: Date.now(), safeWord };
   pending.set(token, mutation);
+  saveSafeWord(safeWord);
   return mutation;
 }
 
@@ -22,14 +61,14 @@ export function consumeToken(token: string): PendingMutation | null {
   const mutation = pending.get(token);
   if (!mutation) return null;
   pending.delete(token);
-  if (Date.now() - mutation.createdAt > TOKEN_TTL_MS) return null;
+  if (Date.now() - mutation.createdAt > tokenTtlMs()) return null;
   return mutation;
 }
 
 export function listPending(): PendingMutation[] {
   const now = Date.now();
   for (const [key, m] of pending) {
-    if (now - m.createdAt > TOKEN_TTL_MS) pending.delete(key);
+    if (now - m.createdAt > tokenTtlMs()) pending.delete(key);
   }
   return [...pending.values()];
 }

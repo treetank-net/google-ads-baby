@@ -4,25 +4,29 @@ Claude Code plugin: MCP server for Google Ads campaign management with two-phase
 
 ## Architecture
 
-Plugin = MCP server (stdio) + Claude Code hooks (safety enforcement).
+Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 
 ### MCP Server (`server/`)
 - TypeScript, `@modelcontextprotocol/sdk` (stdio), `google-ads-api` v23 (community, gRPC)
 - Build: `npm run build` (tsc), runtime: `node dist/index.js`
 - Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
 - Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation`
-- Token store: in-memory, one-shot, 60s TTL
+- Token store: in-memory, one-shot, 1h TTL
 
 ### Safety Hooks (`hooks/` + `scripts/`)
 - `PreToolUse` on `prepare_*` → sets state to "pending"
-- `UserPromptSubmit` → if pending, sets state to "user-confirmed"
+- `UserPromptSubmit` → if pending and user message contains the LLM-selected safe word, sets state to "user-confirmed"
 - `PreToolUse` on `confirm_mutation` → blocks unless "user-confirmed"
 - Effect: LLM cannot call prepare + confirm in sequence without user message between them
 
+### Plugin Manifests
+- Claude Code: `.claude-plugin/plugin.json`
+- Codex: `.codex-plugin/plugin.json` + `.mcp.json`
+
 ### Two-Phase Mutation Flow
-1. LLM calls `prepare_*` → gets preview + token
-2. LLM shows preview to user, asks for confirmation
-3. User types response → hook marks as confirmed
+1. LLM invents a short random ASCII safe word and calls `prepare_*` with `safe_word`
+2. LLM shows preview + safe word to user, asks for confirmation using that word
+3. User types response containing the safe word → hook marks as confirmed
 4. LLM calls `confirm_mutation(token)` → hook allows → server executes
 
 ## Repo & CI
@@ -41,11 +45,18 @@ All via env vars (set in plugin.json, sourced from user's environment):
 - `GOOGLE_ADS_REFRESH_TOKEN` — user's OAuth2 refresh token
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
+- `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
+- `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
+- `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 
 ## Safety Guardrails
 - Budget cap: 500 PLN/day max (configurable in `tools/write.ts`)
 - GAQL mutations blocked in `execute_gaql` tool
-- Token: one-shot, 60s expiry, server-side only
+- Token: one-shot, 1h expiry by default, server-side only
+- Safety level:
+  - `standard`: requires the LLM-selected safe word in a real user message between `prepare_*` and `confirm_mutation`; 1h token/state TTL
+  - `strict`: same flow, but 5 min token/state TTL
+  - `off`: disables the Claude hook gate; server-side prepare token is still required
 - Hook: requires real user message between prepare and confirm
 
 ## Background — dlaczego tak, a nie inaczej

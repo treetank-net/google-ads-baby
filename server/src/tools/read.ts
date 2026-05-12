@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
 import { listAccounts, executeGaql, getCampaigns } from '../client.js';
+import { formatError } from '../errors.js';
+import { normalizeCustomerId, requireCustomerId } from '../validation.js';
 
 export function registerReadTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
@@ -9,8 +11,15 @@ export function registerReadTools(server: McpServer, cfg: AdsConfig) {
     'List all Google Ads accounts under the MCC',
     {},
     async () => {
-      const accounts = await listAccounts(cfg);
-      return { content: [{ type: 'text', text: JSON.stringify(accounts, null, 2) }] };
+      if (!cfg.developerToken || !cfg.loginCustomerId) {
+        return { content: [{ type: 'text', text: 'Error: Brak developer tokena lub MCC ID. Wywołaj najpierw setup_google_auth.' }] };
+      }
+      try {
+        const accounts = await listAccounts(cfg);
+        return { content: [{ type: 'text', text: JSON.stringify(accounts, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: formatError(err) }] };
+      }
     },
   );
 
@@ -22,8 +31,16 @@ export function registerReadTools(server: McpServer, cfg: AdsConfig) {
       days: z.enum(['7', '30']).default('30').describe('Lookback period'),
     },
     async ({ customer_id, days }) => {
-      const rows = await getCampaigns(cfg, customer_id, Number(days) as 7 | 30);
-      return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+      const validationError = requireCustomerId(customer_id);
+      if (validationError) {
+        return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
+      }
+      try {
+        const rows = await getCampaigns(cfg, normalizeCustomerId(customer_id), Number(days) as 7 | 30);
+        return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: formatError(err) }] };
+      }
     },
   );
 
@@ -35,16 +52,21 @@ export function registerReadTools(server: McpServer, cfg: AdsConfig) {
       query: z.string().describe('GAQL query (SELECT ... FROM ... WHERE ...)'),
     },
     async ({ customer_id, query }) => {
+      const validationError = requireCustomerId(customer_id);
+      if (validationError) {
+        return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
+      }
       if (/\b(CREATE|UPDATE|REMOVE|MUTATE)\b/i.test(query)) {
         return {
-          content: [{
-            type: 'text',
-            text: 'Error: GAQL mutations not allowed via this tool. Use prepare_* tools instead.',
-          }],
+          content: [{ type: 'text', text: 'Error: GAQL mutations not allowed. Use prepare_* tools.' }],
         };
       }
-      const rows = await executeGaql(cfg, customer_id, query);
-      return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+      try {
+        const rows = await executeGaql(cfg, normalizeCustomerId(customer_id), query);
+        return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: formatError(err) }] };
+      }
     },
   );
 }
