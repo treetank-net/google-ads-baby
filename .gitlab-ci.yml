@@ -1,0 +1,21 @@
+stages:
+  - mirror
+
+mirror-github:
+  stage: mirror
+  tags:
+    - vps
+  only:
+    - master
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0
+  script:
+    - |
+      if [ -z "${GITHUB_TREETANK_TOKEN:-}" ]; then
+        echo "GITHUB_TREETANK_TOKEN must be configured in GitLab CI variables." >&2
+        exit 1
+      fi
+    - git checkout -B master "$CI_COMMIT_SHA"
+    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master
+    - git push --force --tags "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git"

@@ -7,8 +7,8 @@ Claude Code plugin: MCP server for Google Ads campaign management with two-phase
 Plugin = MCP server (stdio) + Claude Code hooks (safety enforcement).
 
 ### MCP Server (`server/`)
-- `@modelcontextprotocol/sdk` stdio transport
-- `google-ads-api` v23 (gRPC, GAQL)
+- Python, `fastmcp` + oficjalny `google-ads` SDK (gRPC pod spodem, ale oficjalny i utrzymywany przez Google)
+- Uruchamiany przez `uv run` — zero build stepu, `uv` resolve'uje zależności automatycznie
 - Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
 - Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation`
 - Token store: in-memory, one-shot, 60s TTL
@@ -25,9 +25,14 @@ Plugin = MCP server (stdio) + Claude Code hooks (safety enforcement).
 3. User types response → hook marks as confirmed
 4. LLM calls `confirm_mutation(token)` → hook allows → server executes
 
+## Repo & CI
+- GitLab: `treetank/google-ads-baby` (origin, primary)
+- GitHub: `treetank-net/google-ads-baby` (mirror, remote `gh`)
+- `.gitlab-ci.yml`: mirror job pushuje `master` + tagi do GitHuba przy każdym pushu (runner tag: `vps`, wymaga `GITHUB_TREETANK_TOKEN` w CI/CD variables)
+
 ## Commands
-- `cd server && npm install && npm run build` — build MCP server
-- `cd server && npm run dev` — watch mode
+- `cd server && uv run google-ads-baby` — uruchom MCP server (uv instaluje zależności automatycznie)
+- `cd server && uv sync` — zainstaluj zależności bez uruchamiania
 
 ## Config
 All via env vars (set in plugin.json, sourced from user's environment):
@@ -37,14 +42,14 @@ All via env vars (set in plugin.json, sourced from user's environment):
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 
 ## Safety Guardrails
-- Budget cap: 500 PLN/day max (configurable in `tools/write.ts`)
+- Budget cap: 500 PLN/day max (configurable in `tools/write.py`)
 - GAQL mutations blocked in `execute_gaql` tool
 - Token: one-shot, 60s expiry, server-side only
 - Hook: requires real user message between prepare and confirm
 
 ## Background — dlaczego tak, a nie inaczej
 
-Punkt wyjścia: integracja Google Ads w projekcie Marketing67 (ecomhub) — `google-ads-api` v23, GAQL,
+Punkt wyjścia: integracja Google Ads w projekcie Marketing67 (ecomhub) — oficjalny `google-ads` Python SDK, GAQL,
 OAuth2 + developer token, MCC → child accounts. Działa jako data source do dashboardów (read-only).
 
 Cel: narzędzie do **automatyzacji kampanii** (nie tylko odczytu) przez Claude Code Desktop,
@@ -86,12 +91,16 @@ Problem: mutacje na koncie reklamowym przez LLM = ryzyko (halucynacja → wydany
 
 ## Kolejne kroki
 
+Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, testy e2e),
+średnioterminowe (OS dialog fallback, audit log, rate limiting) i otwarte pytania
+(gRPC vs REST, scope tooli, dystrybucja).
+
 ### Natychmiastowe
-- [ ] `cd server && npm install && npm run build` — sprawdzić czy TypeScript się kompiluje
-- [ ] Poprawić mutacje w `client.ts` — obecne `mutateCampaignStatus` i `mutateCampaignBudget` to szkic,
-      `google-ads-api` v23 ma inny interfejs do mutacji niż query (prawdopodobnie `customer.mutateResources()`
-      albo bezpośrednie serwisy jak `customer.campaigns.update()`). Trzeba sprawdzić API i poprawić.
-- [ ] Dodać `.gitignore` (node_modules, dist)
+- [x] Dodać `.gitignore`
+- [x] GitLab CI mirror do GitHuba (`treetank-net/google-ads-baby`)
+- [x] Migracja Node.js → Python (fastmcp + oficjalny google-ads SDK)
+- [x] Poprawka mutacji — użycie oficjalnego `CampaignService.mutate_campaigns` / `CampaignBudgetService`
+- [ ] `cd server && uv run google-ads-baby` — sprawdzić czy serwer startuje (wymaga env vars)
 
 ### Krótkoterminowe
 - [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (dev token w trybie testowym)
@@ -105,11 +114,13 @@ Problem: mutacje na koncie reklamowym przez LLM = ryzyko (halucynacja → wydany
 - [ ] Audit log — każda mutacja logowana do pliku z timestampem, tokenem, wynikiem
 - [ ] Rate limiting — max N mutacji na minutę (server-side)
 - [ ] Konfigurowalny budget cap per-account (nie globalny 500 PLN)
-- [ ] Integracja z ecomhub M67 — ten sam `client.ts` jako shared package?
+- [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania
+      na wzór istniejącej. Cache na struktury kampanii (ad groupy, keywordy, ustawienia) jako template.
+- [ ] Dystrybucja przez marketplace (jak hooker)
 
-### Do przemyślenia
-- Czy `google-ads-api` to najlepszy pakiet? Alternatywa: oficjalny `google-ads` (REST, nie gRPC).
-  gRPC = szybszy, ale cięższy (native deps). REST = prostszy, zero native deps, lepszy na maszynach klientów.
-- Dystrybucja pluginu — marketplace (jak hooker), czy standalone repo z instrukcją?
-- Scope tooli — czy LLM powinien móc tworzyć kampanie od zera, czy tylko zarządzać istniejącymi?
-  Tworzenie kampanii to dużo parametrów i łatwo o błąd. Może read + manage, bez create.
+### Podjęte decyzje
+- **Python + oficjalny SDK** — porzucamy Node.js + community `google-ads-api` na rzecz Pythona
+  z oficjalnym `google-ads` SDK od Google (ten sam co w oficjalnym MCP). Zero build stepu dzięki `uv`.
+- **Marketplace** — standalone repo, ale instalacja przez marketplace (bez marketplace niewygodnie).
+- **Scope: read + manage + create** — LLM tworzy kampanie (często na wzór istniejących),
+  zarządza istniejącymi, odczytuje dane. Cache na template'y kampanii.
