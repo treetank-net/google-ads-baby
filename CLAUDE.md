@@ -22,7 +22,8 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 ### Plugin Manifests
 - Claude Code: `.claude-plugin/plugin.json`
 - Codex: `.codex-plugin/plugin.json` + `.mcp.json` + root `hooks.json`
-- Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`, a tiny wrapper that references the root server and safety script without symlinks
+- Codex marketplace: `.agents/plugins/marketplace.json` points to repo root (`"./"`) so installed MCP has access to `server/` and `scripts/`
+- Codex hook runtime currently may not activate plugin-local hooks; standalone hook package lives at `hooks/google-ads-baby-safety/hooks.json`
 
 ### Two-Phase Mutation Flow
 1. LLM invents a short random ASCII safe word and calls `prepare_*` with `safe_word`
@@ -39,6 +40,7 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 - `cd server && npm install && npm run build` — zainstaluj zależności i zbuduj
 - `cd server && npm run dev` — watch mode (rebuild przy zmianach)
 - `cd server && npm start` — uruchom MCP server (wymaga wcześniejszego buildu)
+- `npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global` — zainstaluj hooki bezpieczeństwa dla Codexa
 
 ## Config
 All via env vars (set in plugin.json, sourced from user's environment):
@@ -59,6 +61,7 @@ All via env vars (set in plugin.json, sourced from user's environment):
   - `strict`: same flow, but 5 min token/state TTL
   - `off`: disables the Claude hook gate; server-side prepare token is still required
 - Hook: requires real user message between prepare and confirm
+- MCP tool `get_safety_setup` tells the LLM/user how to install Codex safety hooks when Codex shows `No plugin hooks`
 
 ## Background — dlaczego tak, a nie inaczej
 

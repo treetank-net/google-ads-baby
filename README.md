@@ -58,11 +58,16 @@ This repository contains Codex plugin metadata:
 .mcp.json
 hooks.json
 .agents/plugins/marketplace.json
+hooks/google-ads-baby-safety/hooks.json
 ```
 
-The marketplace entry points to `./plugins/google-ads-baby`. That directory is a small Codex wrapper that references the server and safety script from the repository root, without using symlinks. Codex loads plugin hooks from a root-level `hooks.json` file.
+The marketplace entry points to the repository root (`"./"`). Codex installs MCP from plugins, but current Codex builds may not activate plugin-local hooks even when `hooks.json` exists. If Codex shows `No plugin hooks`, install the safety hooks separately:
 
-Add this repository as a local Codex plugin/marketplace source, then enable `google-ads-baby`. The MCP server is configured in `.mcp.json`.
+```bash
+npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global
+```
+
+Add this repository as a local Codex plugin/marketplace source, then enable `google-ads-baby`. The MCP server is configured in `.mcp.json` and runs through `npx` so a fresh install can build the server before starting.
 
 ## First Setup
 
@@ -109,6 +114,7 @@ GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS
 Setup:
 
 - `setup_google_auth`
+- `get_safety_setup`
 
 Read:
 

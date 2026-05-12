@@ -13,6 +13,7 @@ import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../
 
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
+const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
 
@@ -29,7 +30,67 @@ function normalizeSafeWord(safeWord: string): string {
   return safeWord.trim();
 }
 
+function safetyHookNotice(cfg: AdsConfig, safeWord?: string) {
+  if (cfg.safetyLevel === 'off') {
+    return {
+      clientHookGate: 'disabled',
+      note: 'Safety level is off. Server-side one-shot mutation tokens are still required, but the client hook gate is disabled.',
+    };
+  }
+
+  return {
+    clientHookGate: 'required',
+    codexStatus: 'Codex currently does not reliably activate plugin-local hooks. If Codex UI says "No plugin hooks", treat hooks as not installed.',
+    codexHookInstall: CODEX_HOOK_INSTALL_COMMAND,
+    llmInstruction: [
+      'Before calling confirm_mutation, ensure the user has installed/enabled the Google Ads Baby safety hooks.',
+      'In Codex, plugin installation alone may only enable MCP. Ask the user to install the hook package if hooks are missing.',
+      safeWord ? `Then show the preview and ask the user to reply with the safe word "${safeWord}".` : 'Then show the preview and ask the user to reply with the safe word.',
+      'Do not call confirm_mutation in the same assistant turn as prepare_*.',
+    ].join(' '),
+  };
+}
+
+function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeWord: string }, preview: string) {
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        preview,
+        token: mutation.token,
+        safeWord: mutation.safeWord,
+        expiresInSeconds: getTokenTtlSeconds(),
+        instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
+        safety: safetyHookNotice(cfg, mutation.safeWord),
+      }, null, 2),
+    }],
+  };
+}
+
 export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
+  server.tool(
+    'get_safety_setup',
+    'Explain the current mutation safety model and how to install Codex hooks if plugin-local hooks are not active.',
+    {},
+    async () => ({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          safetyLevel: cfg.safetyLevel,
+          mutationTokenTtlSeconds: getTokenTtlSeconds(),
+          serverSideProtection: 'Every write requires a prepare_* token. Tokens are server-side, one-shot, and time-limited.',
+          clientHookGate: safetyHookNotice(cfg),
+          codex: {
+            expectedProblem: 'Codex may show "No plugin hooks" because current Codex runtime loads MCP from plugins but does not reliably activate plugin-local hooks.',
+            fix: 'Install the standalone hook package in addition to the plugin.',
+            installCommand: CODEX_HOOK_INSTALL_COMMAND,
+            afterInstall: 'Restart or refresh Codex, then verify hooks are visible/active before running confirm_mutation.',
+          },
+        }, null, 2),
+      }],
+    }),
+  );
+
   server.tool(
     'prepare_campaign_status',
     'Prepare a campaign status change (enable/pause). Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
@@ -48,18 +109,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const action = new_status === 'ENABLED' ? 'Włączenie' : 'Wstrzymanie';
       const preview = `${action} kampanii "${campaign_name}" (ID: ${normalizedCampaignId}) na koncie ${normalizedCustomerId}`;
       const mutation = createToken('campaign_status', { customer_id: normalizedCustomerId, campaign_id: normalizedCampaignId, new_status }, preview, normalizeSafeWord(safe_word));
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            preview,
-            token: mutation.token,
-            safeWord: mutation.safeWord,
-            expiresInSeconds: getTokenTtlSeconds(),
-            instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
-          }, null, 2),
-        }],
-      };
+      return prepareResponse(cfg, mutation, preview);
     },
   );
 
@@ -90,18 +140,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const normalizedBudgetId = normalizeResourceId(budget_id);
       const preview = `Zmiana budżetu kampanii "${campaign_name}": ${current_budget_pln} -> ${new_budget_pln} PLN/dzień (konto ${normalizedCustomerId})`;
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            preview,
-            token: mutation.token,
-            safeWord: mutation.safeWord,
-            expiresInSeconds: getTokenTtlSeconds(),
-            instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
-          }, null, 2),
-        }],
-      };
+      return prepareResponse(cfg, mutation, preview);
     },
   );
 
@@ -128,18 +167,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         campaign_name,
         daily_budget_micros: budgetMicros,
       }, preview, normalizeSafeWord(safe_word));
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            preview,
-            token: mutation.token,
-            safeWord: mutation.safeWord,
-            expiresInSeconds: getTokenTtlSeconds(),
-            instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
-          }, null, 2),
-        }],
-      };
+      return prepareResponse(cfg, mutation, preview);
     },
   );
 
@@ -169,18 +197,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         ad_group_name,
         cpc_bid_micros: cpcMicros,
       }, preview, normalizeSafeWord(safe_word));
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            preview,
-            token: mutation.token,
-            safeWord: mutation.safeWord,
-            expiresInSeconds: getTokenTtlSeconds(),
-            instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
-          }, null, 2),
-        }],
-      };
+      return prepareResponse(cfg, mutation, preview);
     },
   );
 
@@ -213,18 +230,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         descriptions,
         final_url,
       }, preview, normalizeSafeWord(safe_word));
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            preview,
-            token: mutation.token,
-            safeWord: mutation.safeWord,
-            expiresInSeconds: getTokenTtlSeconds(),
-            instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
-          }, null, 2),
-        }],
-      };
+      return prepareResponse(cfg, mutation, preview);
     },
   );
 

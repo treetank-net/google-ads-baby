@@ -8,6 +8,7 @@
   },
   "license": "MIT",
   "keywords": ["google-ads", "mcp", "campaigns", "safety"],
+  "hooks": "./hooks.json",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Google Ads Baby",

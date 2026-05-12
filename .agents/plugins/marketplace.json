@@ -8,7 +8,7 @@
       "name": "google-ads-baby",
       "source": {
         "source": "local",
-        "path": "./plugins/google-ads-baby"
+        "path": "./"
       },
       "policy": {
         "installation": "AVAILABLE",
