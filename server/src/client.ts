@@ -14,7 +14,7 @@ function getCustomer(cfg: AdsConfig, customerId: string) {
   });
 }
 
-export async function listAccounts(cfg: AdsConfig) {
+export async function listAccounts(cfg: AdsConfig): Promise<Array<{ id: string; name: string; currency: string }>> {
   const customer = getCustomer(cfg, cfg.loginCustomerId);
   const rows = await customer.query(`
     SELECT customer_client.id, customer_client.descriptive_name,
@@ -32,7 +32,7 @@ export async function listAccounts(cfg: AdsConfig) {
   }));
 }
 
-export async function getCampaigns(cfg: AdsConfig, customerId: string, days: 7 | 30 = 30) {
+export async function getCampaigns(cfg: AdsConfig, customerId: string, days: 7 | 30 = 30): Promise<unknown[]> {
   const customer = getCustomer(cfg, customerId);
   return customer.query(`
     SELECT campaign.id, campaign.name, campaign.status,
@@ -47,7 +47,7 @@ export async function getCampaigns(cfg: AdsConfig, customerId: string, days: 7 |
   `);
 }
 
-export async function executeGaql(cfg: AdsConfig, customerId: string, query: string) {
+export async function executeGaql(cfg: AdsConfig, customerId: string, query: string): Promise<unknown[]> {
   const customer = getCustomer(cfg, customerId);
   return customer.query(query);
 }
@@ -57,7 +57,7 @@ export async function mutateCampaignStatus(
   customerId: string,
   campaignId: string,
   status: 'ENABLED' | 'PAUSED',
-) {
+): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   return customer.campaigns.update([
     {
@@ -72,7 +72,7 @@ export async function mutateCampaignBudget(
   customerId: string,
   budgetId: string,
   amountMicros: number,
-) {
+): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   return customer.campaignBudgets.update([
     {
@@ -87,7 +87,7 @@ export async function createSearchCampaign(
   customerId: string,
   name: string,
   dailyBudgetMicros: number,
-) {
+): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   const budgetResourceName = ResourceNames.campaignBudget(customerId, '-1');
   return customer.mutateResources([
@@ -127,7 +127,7 @@ export async function createAdGroup(
   campaignId: string,
   name: string,
   cpcBidMicros: number,
-) {
+): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   return customer.adGroups.create([
     {
@@ -147,7 +147,7 @@ export async function createResponsiveSearchAd(
   headlines: string[],
   descriptions: string[],
   finalUrl: string,
-) {
+): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   return customer.adGroupAds.create([
     {
