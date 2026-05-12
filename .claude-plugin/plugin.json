@@ -1,0 +1,25 @@
+{
+  "name": "google-ads-baby",
+  "description": "Google Ads campaign management MCP server with two-phase safety confirmations. Read campaigns, adjust budgets, pause/enable — every mutation requires explicit user approval.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jacek Mariański",
+    "url": "https://treetank.net"
+  },
+  "license": "MIT",
+  "keywords": ["google-ads", "mcp", "campaigns", "safety"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "google-ads": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/dist/index.js"],
+      "env": {
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "${GOOGLE_ADS_DEVELOPER_TOKEN}",
+        "GOOGLE_ADS_MCC_ID": "${GOOGLE_ADS_MCC_ID}",
+        "GOOGLE_ADS_REFRESH_TOKEN": "${GOOGLE_ADS_REFRESH_TOKEN}",
+        "GOOGLE_ADS_CLIENT_ID": "${GOOGLE_ADS_CLIENT_ID}",
+        "GOOGLE_ADS_CLIENT_SECRET": "${GOOGLE_ADS_CLIENT_SECRET}"
+      }
+    }
+  }
+}
