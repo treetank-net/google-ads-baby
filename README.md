@@ -56,10 +56,11 @@ This repository contains Codex plugin metadata:
 ```text
 .codex-plugin/plugin.json
 .mcp.json
+hooks.json
 .agents/plugins/marketplace.json
 ```
 
-The marketplace entry points to `./plugins/google-ads-baby`. That directory is a small Codex wrapper that references the server and hooks from the repository root, without using symlinks.
+The marketplace entry points to `./plugins/google-ads-baby`. That directory is a small Codex wrapper that references the server and safety script from the repository root, without using symlinks. Codex loads plugin hooks from a root-level `hooks.json` file.
 
 Add this repository as a local Codex plugin/marketplace source, then enable `google-ads-baby`. The MCP server is configured in `.mcp.json`.
 
