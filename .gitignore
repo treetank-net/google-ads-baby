@@ -1,3 +1,14 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Secrets & credentials
+.env
+.env.*
+config.json
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+token.json

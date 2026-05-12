@@ -12,13 +12,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
       return {
         content: [{
           type: 'text',
-          text: [
-            'Kliknij link poniżej, aby zalogować się do Google Ads:',
-            '',
-            url,
-            '',
-            'Po autoryzacji zamknij przeglądarkę i napisz cokolwiek tutaj.',
-          ].join('\n'),
+          text: 'Otwieram przeglądarkę z logowaniem Google Ads. Po autoryzacji i konfiguracji w przeglądarce napisz cokolwiek tutaj.',
         }],
       };
     },

@@ -1,8 +1,14 @@
 import http from 'http';
 import { randomBytes } from 'crypto';
+import { exec } from 'child_process';
 import { saveConfig } from './config.js';
 import type { AdsConfig } from './config.js';
 import { GoogleAdsApi } from 'google-ads-api';
+
+function openBrowser(url: string) {
+  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  exec(`${cmd} "${url}"`);
+}
 
 const SCOPES = ['https://www.googleapis.com/auth/adwords'];
 
@@ -302,7 +308,10 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; port: number } {
   authUrl.searchParams.set('prompt', 'consent');
   authUrl.searchParams.set('state', stateParam);
 
-  return { url: authUrl.toString(), port };
+  const url = authUrl.toString();
+  openBrowser(url);
+
+  return { url, port };
 }
 
 export function checkAuthStatus(): { done: boolean } {

@@ -8,7 +8,7 @@
   },
   "license": "MIT",
   "keywords": ["google-ads", "mcp", "campaigns", "safety"],
-  "hooks": "./hooks/hooks.json",
+  "hooks": "./hooks.json",
   "mcpServers": {
     "google-ads": {
       "command": "node",
