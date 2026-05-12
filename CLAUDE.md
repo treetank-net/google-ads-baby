@@ -22,7 +22,7 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 ### Plugin Manifests
 - Claude Code: `.claude-plugin/plugin.json`
 - Codex: `.codex-plugin/plugin.json` + `.mcp.json`
-- Codex marketplace: `.agents/plugins/marketplace.json` points to repo root (`"."`) to avoid symlink/wrapper duplication
+- Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`, a tiny wrapper that references the root server and hooks without symlinks
 
 ### Two-Phase Mutation Flow
 1. LLM invents a short random ASCII safe word and calls `prepare_*` with `safe_word`
