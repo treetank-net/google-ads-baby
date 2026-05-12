@@ -11,8 +11,8 @@
   "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "google-ads": {
-      "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/server", "google-ads-baby"],
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/dist/index.js"],
       "env": {
         "GOOGLE_ADS_DEVELOPER_TOKEN": "${GOOGLE_ADS_DEVELOPER_TOKEN}",
         "GOOGLE_ADS_MCC_ID": "${GOOGLE_ADS_MCC_ID}",

@@ -7,8 +7,8 @@ Claude Code plugin: MCP server for Google Ads campaign management with two-phase
 Plugin = MCP server (stdio) + Claude Code hooks (safety enforcement).
 
 ### MCP Server (`server/`)
-- Python, `fastmcp` + oficjalny `google-ads` SDK (gRPC pod spodem, ale oficjalny i utrzymywany przez Google)
-- Uruchamiany przez `uv run` — zero build stepu, `uv` resolve'uje zależności automatycznie
+- TypeScript, `@modelcontextprotocol/sdk` (stdio), `google-ads-api` v23 (community, gRPC)
+- Build: `npm run build` (tsc), runtime: `node dist/index.js`
 - Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
 - Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation`
 - Token store: in-memory, one-shot, 60s TTL
@@ -31,8 +31,9 @@ Plugin = MCP server (stdio) + Claude Code hooks (safety enforcement).
 - `.gitlab-ci.yml`: mirror job pushuje `master` + tagi do GitHuba przy każdym pushu (runner tag: `vps`, wymaga `GITHUB_TREETANK_TOKEN` w CI/CD variables)
 
 ## Commands
-- `cd server && uv run google-ads-baby` — uruchom MCP server (uv instaluje zależności automatycznie)
-- `cd server && uv sync` — zainstaluj zależności bez uruchamiania
+- `cd server && npm install && npm run build` — zainstaluj zależności i zbuduj
+- `cd server && npm run dev` — watch mode (rebuild przy zmianach)
+- `cd server && npm start` — uruchom MCP server (wymaga wcześniejszego buildu)
 
 ## Config
 All via env vars (set in plugin.json, sourced from user's environment):
@@ -42,14 +43,14 @@ All via env vars (set in plugin.json, sourced from user's environment):
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 
 ## Safety Guardrails
-- Budget cap: 500 PLN/day max (configurable in `tools/write.py`)
+- Budget cap: 500 PLN/day max (configurable in `tools/write.ts`)
 - GAQL mutations blocked in `execute_gaql` tool
 - Token: one-shot, 60s expiry, server-side only
 - Hook: requires real user message between prepare and confirm
 
 ## Background — dlaczego tak, a nie inaczej
 
-Punkt wyjścia: integracja Google Ads w projekcie Marketing67 (ecomhub) — oficjalny `google-ads` Python SDK, GAQL,
+Punkt wyjścia: integracja Google Ads w projekcie Marketing67 (ecomhub) — `google-ads-api` v23, GAQL,
 OAuth2 + developer token, MCC → child accounts. Działa jako data source do dashboardów (read-only).
 
 Cel: narzędzie do **automatyzacji kampanii** (nie tylko odczytu) przez Claude Code Desktop,
@@ -98,9 +99,9 @@ Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, tes
 ### Natychmiastowe
 - [x] Dodać `.gitignore`
 - [x] GitLab CI mirror do GitHuba (`treetank-net/google-ads-baby`)
-- [x] Migracja Node.js → Python (fastmcp + oficjalny google-ads SDK)
-- [x] Poprawka mutacji — użycie oficjalnego `CampaignService.mutate_campaigns` / `CampaignBudgetService`
-- [ ] `cd server && uv run google-ads-baby` — sprawdzić czy serwer startuje (wymaga env vars)
+- [x] Poprawka mutacji — `customer.campaigns.update()` / `customer.campaignBudgets.update()`
+- [x] TypeScript kompiluje się bez błędów (`npm run build`)
+- [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (wymaga env vars)
 
 ### Krótkoterminowe
 - [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (dev token w trybie testowym)
@@ -119,8 +120,9 @@ Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, tes
 - [ ] Dystrybucja przez marketplace (jak hooker)
 
 ### Podjęte decyzje
-- **Python + oficjalny SDK** — porzucamy Node.js + community `google-ads-api` na rzecz Pythona
-  z oficjalnym `google-ads` SDK od Google (ten sam co w oficjalnym MCP). Zero build stepu dzięki `uv`.
+- **Node.js + `google-ads-api`** — TypeScript + community `google-ads-api` v23 (gRPC).
+  Powód: docelowy użytkownik (marketingowiec) ma Node.js, nie ma Pythona.
+  Wersja Pythonowa zachowana w historii gita (commit ccfb764).
 - **Marketplace** — standalone repo, ale instalacja przez marketplace (bez marketplace niewygodnie).
 - **Scope: read + manage + create** — LLM tworzy kampanie (często na wzór istniejących),
   zarządza istniejącymi, odczytuje dane. Cache na template'y kampanii.
