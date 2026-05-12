@@ -1,0 +1,20 @@
+{
+  "name": "google-ads-baby-marketplace",
+  "interface": {
+    "displayName": "Google Ads Baby"
+  },
+  "plugins": [
+    {
+      "name": "google-ads-baby",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
