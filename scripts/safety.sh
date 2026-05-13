@@ -8,7 +8,7 @@
 #   user types safe word → state = "user-confirmed"
 #   confirm_mutation   → allowed only if state = "user-confirmed"
 
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-/tmp}"
+STATE_DIR="${GOOGLE_ADS_BABY_DATA:-${CLAUDE_PLUGIN_DATA:-${HOME:-/tmp}/.google-ads-baby}}"
 STATE_FILE="$STATE_DIR/.gads-confirm-state"
 SAFE_WORD_FILE="$STATE_DIR/.gads-safe-word"
 CONFIG_FILE="$STATE_DIR/config.json"
@@ -87,7 +87,6 @@ case "$HOOK_TYPE" in
         exit 2
       fi
 
-      rm -f "$STATE_FILE"
       exit 0
     fi
     ;;

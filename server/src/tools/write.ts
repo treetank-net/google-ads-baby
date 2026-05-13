@@ -8,7 +8,7 @@ import {
   mutateCampaignBudget,
   mutateCampaignStatus,
 } from '../client.js';
-import { createToken, consumeToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import { createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
@@ -241,6 +241,20 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       token: z.string().describe('Confirmation token from prepare_* response'),
     },
     async ({ token }) => {
+      const pendingMutation = getPendingToken(token);
+      if (!pendingMutation) {
+        return {
+          content: [{ type: 'text', text: 'Error: Token is invalid or expired. Prepare the operation again using prepare_*.' }],
+        };
+      }
+
+      const confirmState = consumeConfirmState(pendingMutation);
+      if (!confirmState.ok) {
+        return {
+          content: [{ type: 'text', text: `Error: ${confirmState.error}` }],
+        };
+      }
+
       const mutation = consumeToken(token);
       if (!mutation) {
         return {
