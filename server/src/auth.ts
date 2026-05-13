@@ -109,18 +109,18 @@ const SETUP_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
   #done-step { display:none; }
 </style></head><body><div class="card">
   <div id="token-step">
-    <h1>Konfiguracja Google Ads</h1>
-    <p>Autoryzacja zakończona. Teraz podaj developer token.</p>
+    <h1>Google Ads Setup</h1>
+    <p>Authorization complete. Now enter your developer token.</p>
     <div class="step">
       <label>Developer Token</label>
-      <div class="hint">Znajdziesz go w <a href="https://ads.google.com/aw/apicenter" target="_blank">Google Ads → API Center</a></div>
-      <input id="dev-token" placeholder="np. aBcDeFgHiJkLmN0P">
+      <div class="hint">You can find it in <a href="https://ads.google.com/aw/apicenter" target="_blank">Google Ads → API Center</a></div>
+      <input id="dev-token" placeholder="e.g. aBcDeFgHiJkLmN0P">
     </div>
-    <button id="btn-load">Pobierz listę kont</button>
+    <button id="btn-load">Load account list</button>
     <div id="token-error" class="error"></div>
   </div>
   <div id="accounts-step">
-    <h1>Wybierz konto</h1>
+    <h1>Select account</h1>
     <div class="step">
       <label>MCC Account ID</label>
       <select id="account-select"></select>
@@ -135,20 +135,20 @@ const SETUP_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
     </div>
     <div class="step">
       <label>Mutation token TTL (seconds)</label>
-      <div class="hint">Opcjonalnie. Puste pole użyje domyślnego czasu dla wybranego poziomu.</div>
-      <input id="mutation-ttl" type="number" min="1" step="1" placeholder="np. 3600">
+      <div class="hint">Optional. Leave empty to use the default for the selected level.</div>
+      <input id="mutation-ttl" type="number" min="1" step="1" placeholder="e.g. 3600">
     </div>
     <div class="step">
       <label>Confirmation state TTL (seconds)</label>
-      <div class="hint">Opcjonalnie dla hooka Claude Code. Puste pole użyje domyślnego czasu dla wybranego poziomu.</div>
-      <input id="confirm-ttl" type="number" min="1" step="1" placeholder="np. 3600">
+      <div class="hint">Optional for the Claude Code hook. Leave empty to use the default for the selected level.</div>
+      <input id="confirm-ttl" type="number" min="1" step="1" placeholder="e.g. 3600">
     </div>
-    <button id="btn-save">Zapisz i zakończ</button>
+    <button id="btn-save">Save and finish</button>
     <div id="accounts-error" class="error"></div>
   </div>
   <div id="done-step" class="done">
-    <h1>Gotowe!</h1>
-    <p>Konfiguracja zapisana.<br>Zamknij tę kartę i wróć do czatu.</p>
+    <h1>Done!</h1>
+    <p>Configuration saved.<br>Close this tab and return to the chat.</p>
   </div>
 </div>
 <script>
@@ -159,16 +159,16 @@ btnLoad.onclick = async () => {
   const devToken = document.getElementById('dev-token').value.trim();
   const errEl = document.getElementById('token-error');
   errEl.textContent = '';
-  if (!devToken) { errEl.textContent = 'Developer token jest wymagany.'; return; }
-  btnLoad.disabled = true; btnLoad.textContent = 'Ładowanie...';
+  if (!devToken) { errEl.textContent = 'Developer token is required.'; return; }
+  btnLoad.disabled = true; btnLoad.textContent = 'Loading...';
   try {
     const res = await fetch('/list-accounts', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ developer_token: devToken })
     });
     const data = await res.json();
-    if (data.error) { errEl.textContent = data.error; btnLoad.disabled = false; btnLoad.textContent = 'Pobierz listę kont'; return; }
-    if (!data.accounts || data.accounts.length === 0) { errEl.textContent = 'Nie znaleziono dostępnych kont Google Ads dla tego użytkownika.'; btnLoad.disabled = false; btnLoad.textContent = 'Pobierz listę kont'; return; }
+    if (data.error) { errEl.textContent = data.error; btnLoad.disabled = false; btnLoad.textContent = 'Load account list'; return; }
+    if (!data.accounts || data.accounts.length === 0) { errEl.textContent = 'No accessible Google Ads accounts found for this user.'; btnLoad.disabled = false; btnLoad.textContent = 'Load account list'; return; }
     const sel = document.getElementById('account-select');
     sel.innerHTML = '';
     data.accounts.forEach(a => {
@@ -179,7 +179,7 @@ btnLoad.onclick = async () => {
     });
     document.getElementById('token-step').style.display = 'none';
     document.getElementById('accounts-step').style.display = 'block';
-  } catch (e) { errEl.textContent = 'Błąd połączenia: ' + e.message; btnLoad.disabled = false; btnLoad.textContent = 'Pobierz listę kont'; }
+  } catch (e) { errEl.textContent = 'Connection error: ' + e.message; btnLoad.disabled = false; btnLoad.textContent = 'Load account list'; }
 };
 
 btnSave.onclick = async () => {
@@ -190,10 +190,10 @@ btnSave.onclick = async () => {
   const confirmTtl = document.getElementById('confirm-ttl').value.trim();
   const errEl = document.getElementById('accounts-error');
   errEl.textContent = '';
-  if (!mccId) { errEl.textContent = 'Wybierz konto z listy.'; return; }
-  if (!['strict', 'standard', 'off'].includes(safetyLevel)) { errEl.textContent = 'Nieprawidłowy safety level.'; return; }
-  if (mutationTtl && !/^\\d+$/.test(mutationTtl)) { errEl.textContent = 'Mutation token TTL musi być liczbą sekund.'; return; }
-  if (confirmTtl && !/^\\d+$/.test(confirmTtl)) { errEl.textContent = 'Confirmation state TTL musi być liczbą sekund.'; return; }
+  if (!mccId) { errEl.textContent = 'Select an account from the list.'; return; }
+  if (!['strict', 'standard', 'off'].includes(safetyLevel)) { errEl.textContent = 'Invalid safety level.'; return; }
+  if (mutationTtl && !/^\\d+$/.test(mutationTtl)) { errEl.textContent = 'Mutation token TTL must be a number of seconds.'; return; }
+  if (confirmTtl && !/^\\d+$/.test(confirmTtl)) { errEl.textContent = 'Confirmation state TTL must be a number of seconds.'; return; }
   btnSave.disabled = true;
   try {
     const res = await fetch('/save-config', {
@@ -210,7 +210,7 @@ btnSave.onclick = async () => {
     if (data.error) { errEl.textContent = data.error; btnSave.disabled = false; return; }
     document.getElementById('accounts-step').style.display = 'none';
     document.getElementById('done-step').style.display = 'block';
-  } catch (e) { errEl.textContent = 'Błąd: ' + e.message; btnSave.disabled = false; }
+  } catch (e) { errEl.textContent = 'Error: ' + e.message; btnSave.disabled = false; }
 };
 </script></body></html>`;
 
@@ -236,15 +236,15 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; port: number } {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
-      if (error) { html(200, `<h1>Błąd autoryzacji</h1><p>${error}</p>`); return; }
-      if (state !== stateParam || !code) { html(400, '<h1>Nieprawidłowe żądanie</h1>'); return; }
+      if (error) { html(200, `<h1>Authorization error</h1><p>${error}</p>`); return; }
+      if (state !== stateParam || !code) { html(400, '<h1>Invalid request</h1>'); return; }
       try {
         const refreshToken = await exchangeCodeForTokens(code, cfg.clientId, cfg.clientSecret, redirectUri);
         await saveConfig({ refreshToken });
         cfg.refreshToken = refreshToken;
         html(200, SETUP_PAGE);
       } catch (err: any) {
-        html(500, `<h1>Błąd</h1><p>${err.message}</p>`);
+        html(500, `<h1>Error</h1><p>${err.message}</p>`);
       }
       return;
     }
@@ -256,7 +256,8 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; port: number } {
         const accounts = await listAccessibleAccounts(cfg);
         json(200, { accounts });
       } catch (err: any) {
-        json(500, { error: err.message || String(err) });
+        const msg = typeof err.message === 'string' ? err.message : JSON.stringify(err.message ?? err);
+        json(500, { error: msg });
       }
       return;
     }

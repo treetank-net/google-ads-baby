@@ -60,7 +60,7 @@ function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeWord: st
         token: mutation.token,
         safeWord: mutation.safeWord,
         expiresInSeconds: getTokenTtlSeconds(),
-        instruction: `Pokaż użytkownikowi preview i poproś, żeby w odpowiedzi użył słowa "${mutation.safeWord}". Dopiero po takiej odpowiedzi wywołaj confirm_mutation z tokenem.`,
+        instruction: `Show the user the preview and ask them to reply with the word "${mutation.safeWord}". Only after such a reply, call confirm_mutation with the token.`,
         safety: safetyHookNotice(cfg, mutation.safeWord),
       }, null, 2),
     }],
@@ -106,8 +106,8 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       if (customerError) return customerError;
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
-      const action = new_status === 'ENABLED' ? 'Włączenie' : 'Wstrzymanie';
-      const preview = `${action} kampanii "${campaign_name}" (ID: ${normalizedCampaignId}) na koncie ${normalizedCustomerId}`;
+      const action = new_status === 'ENABLED' ? 'Enable' : 'Pause';
+      const preview = `${action} campaign "${campaign_name}" (ID: ${normalizedCampaignId}) on account ${normalizedCustomerId}`;
       const mutation = createToken('campaign_status', { customer_id: normalizedCustomerId, campaign_id: normalizedCampaignId, new_status }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -132,13 +132,13 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         return {
           content: [{
             type: 'text',
-            text: `Error: Budżet ${new_budget_pln} PLN przekracza limit bezpieczeństwa (${MAX_BUDGET_MICROS / 1_000_000} PLN/dzień).`,
+            text: `Error: Budget ${new_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`,
           }],
         };
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedBudgetId = normalizeResourceId(budget_id);
-      const preview = `Zmiana budżetu kampanii "${campaign_name}": ${current_budget_pln} -> ${new_budget_pln} PLN/dzień (konto ${normalizedCustomerId})`;
+      const preview = `Change budget of campaign "${campaign_name}": ${current_budget_pln} -> ${new_budget_pln} PLN/day (account ${normalizedCustomerId})`;
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -158,10 +158,10 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       if (customerError) return customerError;
       const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
       if (budgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budżet ${daily_budget_pln} PLN przekracza limit bezpieczeństwa (${MAX_BUDGET_MICROS / 1_000_000} PLN/dzień).`);
+        return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
-      const preview = `Utworzenie wstrzymanej kampanii Search "${campaign_name}" z budżetem ${daily_budget_pln} PLN/dzień na koncie ${normalizedCustomerId}`;
+      const preview = `Create paused Search campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
       const mutation = createToken('search_campaign_create', {
         customer_id: normalizedCustomerId,
         campaign_name,
@@ -186,11 +186,11 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       if (customerError) return customerError;
       const cpcMicros = Math.round(cpc_bid_pln * 1_000_000);
       if (cpcMicros > MAX_CPC_MICROS) {
-        return validationResult(`Stawka CPC ${cpc_bid_pln} PLN przekracza limit bezpieczeństwa (${MAX_CPC_MICROS / 1_000_000} PLN).`);
+        return validationResult(`CPC bid ${cpc_bid_pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`);
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
-      const preview = `Utworzenie wstrzymanej grupy reklam "${ad_group_name}" w kampanii ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, konto ${normalizedCustomerId}`;
+      const preview = `Create paused ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`;
       const mutation = createToken('ad_group_create', {
         customer_id: normalizedCustomerId,
         campaign_id: normalizedCampaignId,
@@ -218,7 +218,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedAdGroupId = normalizeResourceId(ad_group_id);
       const preview = [
-        `Utworzenie wstrzymanej responsive search ad w grupie ${normalizedAdGroupId}, konto ${normalizedCustomerId}`,
+        `Create paused responsive search ad in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
         `Final URL: ${final_url}`,
         `Headlines: ${headlines.join(' | ')}`,
         `Descriptions: ${descriptions.join(' | ')}`,
@@ -244,7 +244,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const mutation = consumeToken(token);
       if (!mutation) {
         return {
-          content: [{ type: 'text', text: 'Error: Token nieważny lub wygasł. Przygotuj operację ponownie za pomocą prepare_*.' }],
+          content: [{ type: 'text', text: 'Error: Token is invalid or expired. Prepare the operation again using prepare_*.' }],
         };
       }
 
@@ -253,32 +253,32 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
 
         if (mutation.action === 'campaign_status') {
           await mutateCampaignStatus(cfg, p.customer_id, p.campaign_id, p.new_status);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — wykonano.` }] };
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.` }] };
         }
 
         if (mutation.action === 'budget_change') {
           await mutateCampaignBudget(cfg, p.customer_id, p.budget_id, p.amount_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — wykonano.` }] };
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.` }] };
         }
 
         if (mutation.action === 'search_campaign_create') {
           const result = await createSearchCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — wykonano.\n${JSON.stringify(result, null, 2)}` }] };
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
         if (mutation.action === 'ad_group_create') {
           const result = await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — wykonano.\n${JSON.stringify(result, null, 2)}` }] };
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
         if (mutation.action === 'responsive_search_ad_create') {
           const result = await createResponsiveSearchAd(cfg, p.customer_id, p.ad_group_id, p.headlines, p.descriptions, p.final_url);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — wykonano.\n${JSON.stringify(result, null, 2)}` }] };
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
-        return { content: [{ type: 'text', text: `Error: Nieznana akcja: ${mutation.action}` }] };
+        return { content: [{ type: 'text', text: `Error: Unknown action: ${mutation.action}` }] };
       } catch (err: any) {
-        return { content: [{ type: 'text', text: `Error: ${err.message || 'Nieznany błąd Google Ads API'}` }] };
+        return { content: [{ type: 'text', text: `Error: ${err.message || 'Unknown Google Ads API error'}` }] };
       }
     },
   );
@@ -290,7 +290,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
     async () => {
       const items = listPending();
       if (!items.length) {
-        return { content: [{ type: 'text', text: 'Brak oczekujących operacji.' }] };
+        return { content: [{ type: 'text', text: 'No pending operations.' }] };
       }
       return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
     },

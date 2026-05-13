@@ -12,7 +12,7 @@ export function registerReadTools(server: McpServer, cfg: AdsConfig) {
     {},
     async () => {
       if (!cfg.developerToken || !cfg.loginCustomerId) {
-        return { content: [{ type: 'text', text: 'Error: Brak developer tokena lub MCC ID. Wywołaj najpierw setup_google_auth.' }] };
+        return { content: [{ type: 'text', text: 'Error: Missing developer token or MCC ID. Run setup_google_auth first.' }] };
       }
       try {
         const accounts = await listAccounts(cfg);

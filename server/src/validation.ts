@@ -4,8 +4,8 @@ export function normalizeCustomerId(customerId: string): string {
 
 export function requireCustomerId(customerId: string): string | null {
   const normalized = normalizeCustomerId(customerId);
-  if (!normalized) return 'Brak customer_id. Wywołaj list_accounts i użyj ID konta klienta, nie MCC.';
-  if (!/^\d+$/.test(normalized)) return `Nieprawidłowy customer_id "${customerId}". Użyj samych cyfr albo formatu z myślnikami.`;
+  if (!normalized) return 'Missing customer_id. Call list_accounts and use the client account ID, not the MCC.';
+  if (!/^\d+$/.test(normalized)) return `Invalid customer_id "${customerId}". Use digits only or hyphenated format.`;
   return null;
 }
 

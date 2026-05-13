@@ -12,7 +12,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
       return {
         content: [{
           type: 'text',
-          text: 'Otwieram przeglądarkę z logowaniem Google Ads. Po autoryzacji i konfiguracji w przeglądarce napisz cokolwiek tutaj.',
+          text: 'Opening a browser for Google Ads login. After authorization and configuration in the browser, type anything here.',
         }],
       };
     },
