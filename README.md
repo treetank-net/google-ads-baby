@@ -127,6 +127,7 @@ Read:
 Write preparation:
 
 - `prepare_campaign_status`
+- `prepare_campaign_removal`
 - `prepare_budget_change`
 - `prepare_search_campaign`
 - `prepare_ad_group`

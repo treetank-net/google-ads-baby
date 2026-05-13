@@ -47,13 +47,14 @@ export async function executeGaql(cfg, customerId, query) {
     return customer.query(query);
 }
 export async function mutateCampaignStatus(cfg, customerId, campaignId, status) {
+    return mutateCampaignStatuses(cfg, customerId, [{ campaignId, status }]);
+}
+export async function mutateCampaignStatuses(cfg, customerId, campaigns) {
     const customer = getCustomer(cfg, customerId);
-    return customer.campaigns.update([
-        {
-            resource_name: `customers/${customerId}/campaigns/${campaignId}`,
-            status: enums.CampaignStatus[status],
-        },
-    ]);
+    return customer.campaigns.update(campaigns.map(({ campaignId, status }) => ({
+        resource_name: `customers/${customerId}/campaigns/${campaignId}`,
+        status: enums.CampaignStatus[status],
+    })));
 }
 export async function mutateCampaignBudget(cfg, customerId, budgetId, amountMicros) {
     const customer = getCustomer(cfg, customerId);
