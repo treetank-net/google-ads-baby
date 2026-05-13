@@ -61,7 +61,9 @@ hooks.json
 hooks/google-ads-baby-safety/hooks.json
 ```
 
-The marketplace entry points to the repository root (`"./"`). Codex installs MCP from plugins, but current Codex builds may not activate plugin-local hooks even when `hooks.json` exists. If Codex shows `No plugin hooks`, install the safety hooks separately:
+The marketplace entry points to `./plugins/google-ads-baby`. That directory is a small Codex wrapper; it starts the MCP server through `npx` from this GitHub repository, so the installed plugin does not need to carry a local copy of `server/`.
+
+Current Codex builds may not activate plugin-local hooks even when `hooks.json` exists. If Codex shows `No plugin hooks`, install the safety hooks separately:
 
 ```bash
 npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global

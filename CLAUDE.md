@@ -22,7 +22,7 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 ### Plugin Manifests
 - Claude Code: `.claude-plugin/plugin.json`
 - Codex: `.codex-plugin/plugin.json` + `.mcp.json` + root `hooks.json`
-- Codex marketplace: `.agents/plugins/marketplace.json` points to repo root (`"./"`) so installed MCP has access to `server/` and `scripts/`
+- Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`; the wrapper uses `npx github:treetank-net/google-ads-baby` for MCP and hook commands
 - Codex hook runtime currently may not activate plugin-local hooks; standalone hook package lives at `hooks/google-ads-baby-safety/hooks.json`
 
 ### Two-Phase Mutation Flow

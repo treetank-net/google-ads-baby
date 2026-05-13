@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__google-ads__(?:prepare_|confirm_)",
+        "hooks": [{ "type": "command", "command": "npx -y --package github:treetank-net/google-ads-baby#master google-ads-baby-safety-hook pre-tool" }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "npx -y --package github:treetank-net/google-ads-baby#master google-ads-baby-safety-hook user-submit" }]
+      }
+    ]
+  }
+}

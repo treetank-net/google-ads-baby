@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "google-ads": {
+      "command": "npx",
+      "args": ["-y", "--package", "github:treetank-net/google-ads-baby#master", "google-ads-baby-mcp"]
+    }
+  }
+}
