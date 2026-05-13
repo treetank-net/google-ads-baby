@@ -11,13 +11,27 @@ const entry = join(serverDir, 'dist', 'index.js');
 function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: serverDir,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     shell: process.platform === 'win32',
+    encoding: 'utf8',
   });
+
+  if (result.stdout) process.stderr.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function runMcpServer() {
+  const result = spawnSync('node', [entry], {
+    cwd: serverDir,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+
+  process.exit(result.status ?? 1);
 }
 
 if (!existsSync(join(serverDir, 'node_modules'))) {
@@ -28,4 +42,4 @@ if (!existsSync(entry)) {
   run('npm', ['run', 'build']);
 }
 
-run('node', [entry]);
+runMcpServer();
