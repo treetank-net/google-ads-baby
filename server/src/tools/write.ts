@@ -278,7 +278,9 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
 
         return { content: [{ type: 'text', text: `Error: Unknown action: ${mutation.action}` }] };
       } catch (err: any) {
-        return { content: [{ type: 'text', text: `Error: ${err.message || 'Unknown Google Ads API error'}` }] };
+        const details = err.statusDetails?.[0]?.errors;
+        const msg = details ? JSON.stringify(details) : (typeof err.message === 'string' ? err.message : JSON.stringify(err.message ?? err));
+        return { content: [{ type: 'text', text: `Error: ${msg || 'Unknown Google Ads API error'}` }] };
       }
     },
   );

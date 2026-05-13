@@ -51,6 +51,10 @@ case "$HOOK_TYPE" in
   pre-tool)
 	    if echo "$TOOL_NAME" | grep -q '^mcp__google-ads__prepare_'; then
 	      echo "pending:$(date +%s)" > "$STATE_FILE"
+	      SAFE_WORD=$(echo "$INPUT" | sed -n 's/.*"safe_word"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+	      if [ -n "$SAFE_WORD" ]; then
+	        echo "$SAFE_WORD" > "$SAFE_WORD_FILE"
+	      fi
 	      exit 0
 	    fi
 
