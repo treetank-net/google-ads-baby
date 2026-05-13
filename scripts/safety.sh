@@ -47,9 +47,24 @@ INPUT=$(cat)
 
 TOOL_NAME=$(echo "$INPUT" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 
+safe_word_present() {
+  node -e '
+const word = process.argv[1] || "";
+const input = process.argv[2] || "";
+let text = input;
+try {
+  const parsed = JSON.parse(input);
+  text = String(parsed.prompt ?? parsed.message ?? parsed.text ?? input);
+} catch {}
+const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const re = new RegExp("(^|[^A-Za-z0-9_-])" + escaped + "(?=$|[^A-Za-z0-9_-])", "i");
+process.exit(word && re.test(text) ? 0 : 1);
+' "$1" "$INPUT"
+}
+
 case "$HOOK_TYPE" in
   pre-tool)
-	    if echo "$TOOL_NAME" | grep -q '^mcp__google-ads__prepare_'; then
+	    if echo "$TOOL_NAME" | grep -Eq '^mcp__google[-_]ads__prepare_'; then
 	      echo "pending:$(date +%s)" > "$STATE_FILE"
 	      SAFE_WORD=$(echo "$INPUT" | sed -n 's/.*"safe_word"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 	      if [ -n "$SAFE_WORD" ]; then
@@ -58,7 +73,7 @@ case "$HOOK_TYPE" in
 	      exit 0
 	    fi
 
-	    if [ "$TOOL_NAME" = "mcp__google-ads__confirm_mutation" ]; then
+	    if echo "$TOOL_NAME" | grep -Eq '^mcp__google[-_]ads__confirm_mutation$'; then
 	      if [ "$SAFETY_LEVEL" = "off" ] || [ "${GOOGLE_ADS_YOLO:-}" = "1" ]; then
 	        rm -f "$STATE_FILE"
 	        exit 0
@@ -99,7 +114,7 @@ case "$HOOK_TYPE" in
 	          exit 0
 	        fi
 	        SAFE_WORD=$(cat "$SAFE_WORD_FILE")
-	        if [ -n "$SAFE_WORD" ] && printf '%s' "$INPUT" | grep -Fqi "$SAFE_WORD"; then
+	        if safe_word_present "$SAFE_WORD"; then
 	          echo "user-confirmed:$(date +%s)" > "$STATE_FILE"
 	        fi
 	      fi

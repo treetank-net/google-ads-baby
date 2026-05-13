@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__google-ads__(?:prepare_|confirm_)",
+        "matcher": "mcp__google[-_]ads__(?:prepare_|confirm_)",
         "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/safety.sh pre-tool" }]
       }
     ],
