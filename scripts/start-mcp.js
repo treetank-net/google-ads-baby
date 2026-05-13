@@ -8,22 +8,6 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const serverDir = join(root, 'server');
 const entry = join(serverDir, 'dist', 'index.js');
 
-function run(command, args) {
-  const result = spawnSync(command, args, {
-    cwd: serverDir,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: process.platform === 'win32',
-    encoding: 'utf8',
-  });
-
-  if (result.stdout) process.stderr.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
-  }
-}
-
 function runMcpServer() {
   const result = spawnSync('node', [entry], {
     cwd: serverDir,
@@ -34,12 +18,9 @@ function runMcpServer() {
   process.exit(result.status ?? 1);
 }
 
-if (!existsSync(join(serverDir, 'node_modules'))) {
-  run('npm', ['install']);
-}
-
 if (!existsSync(entry)) {
-  run('npm', ['run', 'build']);
+  process.stderr.write(`Missing built MCP server at ${entry}. Run "cd server && npm install && npm run build".\n`);
+  process.exit(1);
 }
 
 runMcpServer();

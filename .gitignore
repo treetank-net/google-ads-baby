@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!server/dist/
+!server/dist/**
 *.tsbuildinfo
 
 # Secrets & credentials
