@@ -129,6 +129,7 @@ Write preparation:
 - `prepare_campaign_status`
 - `prepare_campaign_removal`
 - `prepare_budget_change`
+- `prepare_image_asset_from_file`
 - `prepare_image_asset_from_url`
 - `prepare_search_campaign`
 - `prepare_display_campaign`

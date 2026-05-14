@@ -1,4 +1,5 @@
 import { GoogleAdsApi, enums, ResourceNames } from 'google-ads-api';
+import { readFileSync, statSync } from 'fs';
 function getCustomer(cfg, customerId) {
     const api = new GoogleAdsApi({
         client_id: cfg.clientId,
@@ -220,6 +221,29 @@ export async function uploadImageAssetFromUrl(cfg, customerId, assetName, imageU
     }
     if (data.length > maxImageBytes) {
         throw new Error(`Image is too large (${data.length} bytes). Max allowed: ${maxImageBytes} bytes.`);
+    }
+    return customer.assets.create([
+        {
+            name: assetName,
+            image_asset: { data },
+        },
+    ]);
+}
+export async function uploadImageAssetFromFile(cfg, customerId, assetName, filePath, maxImageBytes) {
+    const customer = getCustomer(cfg, customerId);
+    const st = statSync(filePath);
+    if (!st.isFile()) {
+        throw new Error(`Path is not a file: ${filePath}`);
+    }
+    if (st.size <= 0) {
+        throw new Error(`File is empty: ${filePath}`);
+    }
+    if (st.size > maxImageBytes) {
+        throw new Error(`File is too large (${st.size} bytes). Max allowed: ${maxImageBytes} bytes.`);
+    }
+    const data = readFileSync(filePath);
+    if (!data.length) {
+        throw new Error(`File is empty: ${filePath}`);
     }
     return customer.assets.create([
         {
