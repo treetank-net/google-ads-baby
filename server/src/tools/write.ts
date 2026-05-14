@@ -593,9 +593,11 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_name: z.string().min(1).describe('New campaign name'),
       daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+      business_name_asset_id: z.string().optional().describe('Optional existing TEXT asset ID for PMax brand guidelines business name'),
+      logo_asset_id: z.string().optional().describe('Optional existing square IMAGE asset ID for PMax brand guidelines logo'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
     },
-    async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
+    async ({ customer_id, campaign_name, daily_budget_pln, business_name_asset_id, logo_asset_id, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
       const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
@@ -603,11 +605,24 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
-      const preview = `Create paused Performance Max campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
+      const normalizedBusinessNameAssetId = business_name_asset_id ? normalizeResourceId(business_name_asset_id) : undefined;
+      const normalizedLogoAssetId = logo_asset_id ? normalizeResourceId(logo_asset_id) : undefined;
+      if (normalizedLogoAssetId) {
+        const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, [normalizedLogoAssetId]);
+        const placementError = validateAssetPlacement('PMax brand logo', [normalizedLogoAssetId], imageInfo, 0.95, 1.05);
+        if (placementError) return validationResult(placementError);
+      }
+      const preview = [
+        `Create paused Performance Max campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`,
+        `Business name asset: ${normalizedBusinessNameAssetId || '(none)'}`,
+        `Logo asset: ${normalizedLogoAssetId || '(none)'}`,
+      ].join('\n');
       const mutation = createToken('performance_max_campaign_create', {
         customer_id: normalizedCustomerId,
         campaign_name,
         daily_budget_micros: budgetMicros,
+        business_name_asset_id: normalizedBusinessNameAssetId,
+        logo_asset_id: normalizedLogoAssetId,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -1186,7 +1201,10 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         }
 
         if (mutation.action === 'performance_max_campaign_create') {
-          const result = await createPerformanceMaxCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
+          const result = await createPerformanceMaxCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros, {
+            businessNameAssetId: p.business_name_asset_id,
+            logoAssetId: p.logo_asset_id,
+          });
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 

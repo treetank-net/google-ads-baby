@@ -134,9 +134,10 @@ export async function createDisplayCampaign(cfg, customerId, name, dailyBudgetMi
         },
     ]);
 }
-export async function createPerformanceMaxCampaign(cfg, customerId, name, dailyBudgetMicros) {
+export async function createPerformanceMaxCampaign(cfg, customerId, name, dailyBudgetMicros, brandAssets) {
     const customer = getCustomer(cfg, customerId);
     const budgetResourceName = ResourceNames.campaignBudget(customerId, '-1');
+    const campaignResourceName = ResourceNames.campaign(customerId, '-2');
     return customer.mutateResources([
         {
             entity: 'campaign_budget',
@@ -153,6 +154,7 @@ export async function createPerformanceMaxCampaign(cfg, customerId, name, dailyB
             entity: 'campaign',
             operation: 'create',
             resource: {
+                resource_name: campaignResourceName,
                 name,
                 advertising_channel_type: enums.AdvertisingChannelType.PERFORMANCE_MAX,
                 status: enums.CampaignStatus.PAUSED,
@@ -161,6 +163,24 @@ export async function createPerformanceMaxCampaign(cfg, customerId, name, dailyB
                 contains_eu_political_advertising: enums.EuPoliticalAdvertisingStatus.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING,
             },
         },
+        ...(brandAssets?.businessNameAssetId ? [{
+                entity: 'campaign_asset',
+                operation: 'create',
+                resource: {
+                    campaign: campaignResourceName,
+                    asset: ResourceNames.asset(customerId, brandAssets.businessNameAssetId),
+                    field_type: enums.AssetFieldType.BUSINESS_NAME,
+                },
+            }] : []),
+        ...(brandAssets?.logoAssetId ? [{
+                entity: 'campaign_asset',
+                operation: 'create',
+                resource: {
+                    campaign: campaignResourceName,
+                    asset: ResourceNames.asset(customerId, brandAssets.logoAssetId),
+                    field_type: enums.AssetFieldType.LOGO,
+                },
+            }] : []),
     ]);
 }
 export async function createAdGroup(cfg, customerId, campaignId, name, cpcBidMicros) {

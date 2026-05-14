@@ -15,7 +15,10 @@ export declare function removeCampaigns(cfg: AdsConfig, customerId: string, camp
 export declare function mutateCampaignBudget(cfg: AdsConfig, customerId: string, budgetId: string, amountMicros: number): Promise<unknown>;
 export declare function createSearchCampaign(cfg: AdsConfig, customerId: string, name: string, dailyBudgetMicros: number): Promise<unknown>;
 export declare function createDisplayCampaign(cfg: AdsConfig, customerId: string, name: string, dailyBudgetMicros: number): Promise<unknown>;
-export declare function createPerformanceMaxCampaign(cfg: AdsConfig, customerId: string, name: string, dailyBudgetMicros: number): Promise<unknown>;
+export declare function createPerformanceMaxCampaign(cfg: AdsConfig, customerId: string, name: string, dailyBudgetMicros: number, brandAssets?: {
+    businessNameAssetId?: string;
+    logoAssetId?: string;
+}): Promise<unknown>;
 export declare function createAdGroup(cfg: AdsConfig, customerId: string, campaignId: string, name: string, cpcBidMicros: number): Promise<unknown>;
 export declare function createDisplayAdGroup(cfg: AdsConfig, customerId: string, campaignId: string, name: string, cpcBidMicros: number): Promise<unknown>;
 export declare function createResponsiveSearchAd(cfg: AdsConfig, customerId: string, adGroupId: string, headlines: string[], descriptions: string[], finalUrl: string): Promise<unknown>;
