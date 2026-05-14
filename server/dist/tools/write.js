@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { readFileSync, statSync } from 'fs';
 import { createAdGroup, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { formatError } from '../errors.js';
@@ -116,6 +117,96 @@ function validateResponsiveDisplayInput(input) {
     if (input.logoImageAssetIds.length > 5)
         return 'Responsive display ad clone can use at most 5 logo image asset IDs.';
     return null;
+}
+function parseImageDimensions(data) {
+    if (data.length >= 24 && data.toString('ascii', 1, 4) === 'PNG') {
+        return { format: 'png', width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+    }
+    if (data.length >= 10 && data.toString('ascii', 0, 3) === 'GIF') {
+        return { format: 'gif', width: data.readUInt16LE(6), height: data.readUInt16LE(8) };
+    }
+    if (data.length >= 12 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP') {
+        const chunk = data.toString('ascii', 12, 16);
+        if (chunk === 'VP8X' && data.length >= 30) {
+            return {
+                format: 'webp',
+                width: 1 + data.readUIntLE(24, 3),
+                height: 1 + data.readUIntLE(27, 3),
+            };
+        }
+        if (chunk === 'VP8 ' && data.length >= 30) {
+            return { format: 'webp', width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff };
+        }
+        if (chunk === 'VP8L' && data.length >= 25) {
+            const bits = data.readUInt32LE(21);
+            return { format: 'webp', width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+        }
+    }
+    if (data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) {
+        let offset = 2;
+        while (offset + 9 < data.length) {
+            if (data[offset] !== 0xff) {
+                offset += 1;
+                continue;
+            }
+            const marker = data[offset + 1];
+            const length = data.readUInt16BE(offset + 2);
+            if (length < 2)
+                return null;
+            if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+                return { format: 'jpeg', width: data.readUInt16BE(offset + 7), height: data.readUInt16BE(offset + 5) };
+            }
+            offset += 2 + length;
+        }
+    }
+    return null;
+}
+function imageWarnings(width, height, bytes) {
+    const warnings = [];
+    const ratio = width / height;
+    if (width < 128 || height < 128)
+        warnings.push('Image is very small; many Google Ads placements require at least 128px on the shorter side.');
+    if (bytes > 5_000_000)
+        warnings.push('Image is over 5 MB; it is below the server cap but may be inconvenient to reuse.');
+    if (Math.abs(ratio - 1) < 0.03)
+        warnings.push('Likely suitable for square marketing image or square logo usage.');
+    if (Math.abs(ratio - 1.91) < 0.08)
+        warnings.push('Likely suitable for landscape marketing image usage.');
+    if (ratio >= 3 && ratio <= 5)
+        warnings.push('Likely suitable for landscape logo usage.');
+    if (warnings.length === 0)
+        warnings.push('Aspect ratio does not match common responsive display slots exactly; verify intended usage before linking this asset.');
+    return warnings;
+}
+function inspectImageBuffer(data) {
+    const dimensions = parseImageDimensions(data);
+    if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0)
+        return null;
+    return {
+        ...dimensions,
+        bytes: data.length,
+        aspectRatio: Number((dimensions.width / dimensions.height).toFixed(4)),
+        warnings: imageWarnings(dimensions.width, dimensions.height, data.length),
+    };
+}
+function formatImageInfo(info) {
+    return [
+        `Detected image: ${info.format.toUpperCase()}, ${info.width}x${info.height}, aspect ${info.aspectRatio}, ${info.bytes} bytes`,
+        ...info.warnings.map((warning) => `Image note: ${warning}`),
+    ];
+}
+async function fetchImageForPreview(url) {
+    const response = await fetch(url);
+    if (!response.ok)
+        throw new Error(`Image preview download failed: HTTP ${response.status} from ${url}`);
+    const contentLength = Number(response.headers.get('content-length') || '');
+    if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES) {
+        throw new Error(`Image is too large (${contentLength} bytes). Max allowed: ${MAX_IMAGE_BYTES} bytes.`);
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > MAX_IMAGE_BYTES)
+        throw new Error(`Image is too large (${data.length} bytes). Max allowed: ${MAX_IMAGE_BYTES} bytes.`);
+    return { data, contentType: response.headers.get('content-type') || 'unknown' };
 }
 function safetyHookNotice(cfg, safeWord) {
     if (cfg.safetyLevel === 'off') {
@@ -250,10 +341,27 @@ export function registerWriteTools(server, cfg) {
         if (customerError)
             return customerError;
         const normalizedCustomerId = normalizeCustomerId(customer_id);
+        let info = null;
+        try {
+            const st = statSync(file_path);
+            if (!st.isFile())
+                return validationResult(`Path is not a file: ${file_path}`);
+            if (st.size <= 0)
+                return validationResult(`File is empty: ${file_path}`);
+            if (st.size > MAX_IMAGE_BYTES)
+                return validationResult(`File is too large (${st.size} bytes). Max allowed: ${MAX_IMAGE_BYTES} bytes.`);
+            info = inspectImageBuffer(readFileSync(file_path));
+            if (!info)
+                return validationResult('File does not look like a supported image with readable dimensions.');
+        }
+        catch (err) {
+            return validationResult(err?.message || `Cannot inspect file: ${file_path}`);
+        }
         const preview = [
             `Upload image asset "${asset_name}" on account ${normalizedCustomerId}`,
             `Source file: ${file_path}`,
             `Safety cap: max ${MAX_IMAGE_BYTES} bytes`,
+            ...formatImageInfo(info),
         ].join('\n');
         const mutation = createToken('image_asset_upload_from_file', {
             customer_id: normalizedCustomerId,
@@ -272,10 +380,27 @@ export function registerWriteTools(server, cfg) {
         if (customerError)
             return customerError;
         const normalizedCustomerId = normalizeCustomerId(customer_id);
+        let info = null;
+        let contentType = 'unknown';
+        try {
+            const previewImage = await fetchImageForPreview(image_url);
+            contentType = previewImage.contentType;
+            if (!contentType.toLowerCase().startsWith('image/')) {
+                return validationResult(`URL does not look like an image (content-type: ${contentType}).`);
+            }
+            info = inspectImageBuffer(previewImage.data);
+            if (!info)
+                return validationResult('URL image does not have readable dimensions.');
+        }
+        catch (err) {
+            return validationResult(err?.message || `Cannot inspect URL image: ${image_url}`);
+        }
         const preview = [
             `Upload image asset "${asset_name}" on account ${normalizedCustomerId}`,
             `Source URL: ${image_url}`,
+            `Content-Type: ${contentType}`,
             `Safety cap: max ${MAX_IMAGE_BYTES} bytes`,
+            ...formatImageInfo(info),
         ].join('\n');
         const mutation = createToken('image_asset_upload_from_url', {
             customer_id: normalizedCustomerId,

@@ -33,7 +33,8 @@ All creation flows should default to safe inactive states:
 - Add campaign location and language targeting.
 - Create paused Display campaigns.
 - Create paused Display ad groups.
-- Upload image assets from local files or public URLs.
+- Upload image assets from local files or public URLs with dimension and aspect
+  ratio previews.
 - Create paused responsive display ads with text and image assets.
 - Clone supported ads through a generic `prepare_clone_entity` flow.
 
@@ -45,14 +46,14 @@ All creation flows should default to safe inactive states:
 
 ### Display
 
-- Validate responsive display image dimensions and aspect ratios before prepare.
+- Validate responsive display image asset dimensions before ad prepare.
 - Add clone support for more display-like ad formats when discovered in real
   accounts.
 
 ### Image Assets
 
-- Validate image dimensions, file size, and aspect ratios before prepare.
-- Return previews with asset names, dimensions, and intended usage.
+- Add stricter placement-specific image aspect ratio blocking when the target
+  usage is known.
 - Reuse existing image assets by resource name when requested.
 
 ### Performance Max
