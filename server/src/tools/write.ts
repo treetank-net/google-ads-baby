@@ -3,6 +3,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
 import {
   createAdGroup,
+  createDisplayAdGroup,
+  createDisplayCampaign,
+  createResponsiveDisplayAd,
   createResponsiveSearchAd,
   createSearchCampaign,
   mutateCampaignBudget,
@@ -21,6 +24,8 @@ const campaignRefSchema = z.object({
   campaign_id: z.string().describe('Campaign ID'),
   campaign_name: z.string().describe('Campaign name for preview'),
 });
+const displayAssetIdListSchema = z.array(z.string()).min(1).max(15);
+const displayLogoAssetIdListSchema = z.array(z.string()).max(5);
 
 function validationResult(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }] };
@@ -205,6 +210,33 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
+    'prepare_display_campaign',
+    'Prepare creation of a paused Display campaign with a daily budget. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_name: z.string().min(1).describe('New campaign name'),
+      daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
+      if (budgetMicros > MAX_BUDGET_MICROS) {
+        return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
+      }
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = `Create paused Display campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
+      const mutation = createToken('display_campaign_create', {
+        customer_id: normalizedCustomerId,
+        campaign_name,
+        daily_budget_micros: budgetMicros,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_ad_group',
     'Prepare creation of a paused Search ad group under an existing campaign. Returns a preview and confirmation token.',
     {
@@ -225,6 +257,36 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const normalizedCampaignId = normalizeResourceId(campaign_id);
       const preview = `Create paused ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`;
       const mutation = createToken('ad_group_create', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        ad_group_name,
+        cpc_bid_micros: cpcMicros,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_display_ad_group',
+    'Prepare creation of a paused Display ad group under an existing campaign. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Existing campaign ID'),
+      ad_group_name: z.string().min(1).describe('New ad group name'),
+      cpc_bid_pln: z.number().positive().describe('Max CPC bid in PLN; capped by server safety limit'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const cpcMicros = Math.round(cpc_bid_pln * 1_000_000);
+      if (cpcMicros > MAX_CPC_MICROS) {
+        return validationResult(`CPC bid ${cpc_bid_pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`);
+      }
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const preview = `Create paused Display ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`;
+      const mutation = createToken('display_ad_group_create', {
         customer_id: normalizedCustomerId,
         campaign_id: normalizedCampaignId,
         ad_group_name,
@@ -262,6 +324,69 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         headlines,
         descriptions,
         final_url,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_responsive_display_ad',
+    'Prepare creation of a paused responsive display ad under an existing ad group. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_group_id: z.string().describe('Existing ad group ID'),
+      business_name: z.string().min(1).max(25).describe('Business name, max 25 chars'),
+      headlines: z.array(z.string().min(1).max(30)).min(1).max(5).describe('1-5 short headlines, max 30 chars each'),
+      long_headline: z.string().min(1).max(90).describe('Long headline, max 90 chars'),
+      descriptions: z.array(z.string().min(1).max(90)).min(1).max(5).describe('1-5 descriptions, max 90 chars each'),
+      final_url: z.string().url().describe('Landing page URL'),
+      marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 IMAGE asset IDs, e.g. ["123","456"]'),
+      square_marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 square IMAGE asset IDs'),
+      logo_image_asset_ids: displayLogoAssetIdListSchema.describe('Optional logo IMAGE asset IDs, up to 5'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({
+      customer_id,
+      ad_group_id,
+      business_name,
+      headlines,
+      long_headline,
+      descriptions,
+      final_url,
+      marketing_image_asset_ids,
+      square_marketing_image_asset_ids,
+      logo_image_asset_ids,
+      safe_word,
+    }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+      const normalizedMarketingImageAssetIds = marketing_image_asset_ids.map(normalizeResourceId);
+      const normalizedSquareMarketingImageAssetIds = square_marketing_image_asset_ids.map(normalizeResourceId);
+      const normalizedLogoImageAssetIds = logo_image_asset_ids.map(normalizeResourceId);
+      const preview = [
+        `Create paused responsive display ad in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
+        `Final URL: ${final_url}`,
+        `Business name: ${business_name}`,
+        `Headlines (${headlines.length}): ${headlines.join(' | ')}`,
+        `Long headline: ${long_headline}`,
+        `Descriptions (${descriptions.length}): ${descriptions.join(' | ')}`,
+        `Marketing image assets: ${normalizedMarketingImageAssetIds.join(', ')}`,
+        `Square marketing image assets: ${normalizedSquareMarketingImageAssetIds.join(', ')}`,
+        `Logo image assets: ${normalizedLogoImageAssetIds.length ? normalizedLogoImageAssetIds.join(', ') : '(none)'}`,
+      ].join('\n');
+      const mutation = createToken('responsive_display_ad_create', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: normalizedAdGroupId,
+        business_name,
+        headlines,
+        long_headline,
+        descriptions,
+        final_url,
+        marketing_image_asset_ids: normalizedMarketingImageAssetIds,
+        square_marketing_image_asset_ids: normalizedSquareMarketingImageAssetIds,
+        logo_image_asset_ids: normalizedLogoImageAssetIds,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -322,13 +447,40 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
+        if (mutation.action === 'display_campaign_create') {
+          const result = await createDisplayCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
         if (mutation.action === 'ad_group_create') {
           const result = await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
+        if (mutation.action === 'display_ad_group_create') {
+          const result = await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
         if (mutation.action === 'responsive_search_ad_create') {
           const result = await createResponsiveSearchAd(cfg, p.customer_id, p.ad_group_id, p.headlines, p.descriptions, p.final_url);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'responsive_display_ad_create') {
+          const result = await createResponsiveDisplayAd(
+            cfg,
+            p.customer_id,
+            p.ad_group_id,
+            p.business_name,
+            p.headlines,
+            p.long_headline,
+            p.descriptions,
+            p.final_url,
+            p.marketing_image_asset_ids,
+            p.square_marketing_image_asset_ids,
+            p.logo_image_asset_ids,
+          );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 

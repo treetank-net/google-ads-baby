@@ -130,8 +130,11 @@ Write preparation:
 - `prepare_campaign_removal`
 - `prepare_budget_change`
 - `prepare_search_campaign`
+- `prepare_display_campaign`
 - `prepare_ad_group`
+- `prepare_display_ad_group`
 - `prepare_responsive_search_ad`
+- `prepare_responsive_display_ad`
 
 Execution:
 
