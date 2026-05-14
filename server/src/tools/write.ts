@@ -696,22 +696,50 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       campaign_id: z.string().describe('Existing Performance Max campaign ID'),
       asset_group_name: z.string().min(1).describe('New asset group name'),
       final_urls: z.array(z.string().url()).min(1).max(20).describe('Landing page final URLs for the asset group'),
+      assets: z.array(z.object({
+        asset_id: z.string().describe('Existing asset ID'),
+        field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
+      })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Existing assets to link while creating the asset group. PMax requires core creative assets at creation time.'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
     },
-    async ({ customer_id, campaign_id, asset_group_name, final_urls, safe_word }) => {
+    async ({ customer_id, campaign_id, asset_group_name, final_urls, assets, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const normalizedAssets = assets.map((asset) => ({
+        asset_id: normalizeResourceId(asset.asset_id),
+        field_type: asset.field_type,
+      }));
+      const unique = new Set(normalizedAssets.map((asset) => `${asset.asset_id}:${asset.field_type}`));
+      if (unique.size !== normalizedAssets.length) return validationResult('Duplicate asset group asset links in request.');
+      const countByField = (field: string) => normalizedAssets.filter((asset) => asset.field_type === field).length;
+      if (countByField('HEADLINE') < 3) return validationResult('Performance Max asset groups require at least 3 HEADLINE assets.');
+      if (countByField('LONG_HEADLINE') < 1) return validationResult('Performance Max asset groups require at least 1 LONG_HEADLINE asset.');
+      if (countByField('DESCRIPTION') < 2) return validationResult('Performance Max asset groups require at least 2 DESCRIPTION assets.');
+      if (countByField('MARKETING_IMAGE') < 1) return validationResult('Performance Max asset groups require at least 1 MARKETING_IMAGE asset.');
+      if (countByField('SQUARE_MARKETING_IMAGE') < 1) return validationResult('Performance Max asset groups require at least 1 SQUARE_MARKETING_IMAGE asset.');
+      const imageAssets = normalizedAssets.filter((asset) => ['MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'PORTRAIT_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO'].includes(asset.field_type));
+      const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((asset) => asset.asset_id));
+      const byField = (field: string) => imageAssets.filter((asset) => asset.field_type === field).map((asset) => asset.asset_id);
+      const placementError = validateAssetPlacement('Marketing image', byField('MARKETING_IMAGE'), imageInfo, 1.75, 2.05)
+        || validateAssetPlacement('Square marketing image', byField('SQUARE_MARKETING_IMAGE'), imageInfo, 0.95, 1.05)
+        || validateAssetPlacement('Portrait marketing image', byField('PORTRAIT_MARKETING_IMAGE'), imageInfo, 0.75, 0.85)
+        || validateAssetPlacement('Logo', byField('LOGO'), imageInfo, 0.95, 5.0)
+        || validateAssetPlacement('Landscape logo', byField('LANDSCAPE_LOGO'), imageInfo, 3.0, 5.0);
+      if (placementError) return validationResult(placementError);
       const preview = [
         `Create paused asset group "${asset_group_name}" in campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
         `Final URLs: ${final_urls.join(', ')}`,
+        `Assets (${normalizedAssets.length}):`,
+        ...normalizedAssets.map((asset) => `- ${asset.field_type}: ${asset.asset_id}`),
       ].join('\n');
       const mutation = createToken('asset_group_create', {
         customer_id: normalizedCustomerId,
         campaign_id: normalizedCampaignId,
         asset_group_name,
         final_urls,
+        assets: normalizedAssets,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -1219,7 +1247,17 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         }
 
         if (mutation.action === 'asset_group_create') {
-          const result = await createAssetGroup(cfg, p.customer_id, p.campaign_id, p.asset_group_name, p.final_urls);
+          const result = await createAssetGroup(
+            cfg,
+            p.customer_id,
+            p.campaign_id,
+            p.asset_group_name,
+            p.final_urls,
+            p.assets.map((asset: any) => ({
+              assetId: asset.asset_id,
+              fieldType: asset.field_type,
+            })),
+          );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 

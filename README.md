@@ -140,7 +140,8 @@ Write preparation:
 - `prepare_performance_max_campaign`
 - `prepare_ad_group`
 - `prepare_display_ad_group`
-- `prepare_asset_group`
+- `prepare_asset_group` (creates a PMax asset group together with its required
+  initial assets)
 - `prepare_responsive_search_ad`
 - `prepare_responsive_display_ad`
 - `prepare_keywords`

@@ -40,7 +40,10 @@ export declare function createCampaignTargeting(cfg: AdsConfig, customerId: stri
     locationCriterionIds: string[];
     languageCriterionIds: string[];
 }): Promise<unknown>;
-export declare function createAssetGroup(cfg: AdsConfig, customerId: string, campaignId: string, name: string, finalUrls: string[]): Promise<unknown>;
+export declare function createAssetGroup(cfg: AdsConfig, customerId: string, campaignId: string, name: string, finalUrls: string[], assets: Array<{
+    assetId: string;
+    fieldType: string;
+}>): Promise<unknown>;
 export declare function createAssetGroupAssets(cfg: AdsConfig, customerId: string, assetGroupId: string, assets: Array<{
     assetId: string;
     fieldType: string;

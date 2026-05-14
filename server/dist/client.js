@@ -273,15 +273,30 @@ export async function createCampaignTargeting(cfg, customerId, campaignId, targe
         })),
     ]);
 }
-export async function createAssetGroup(cfg, customerId, campaignId, name, finalUrls) {
+export async function createAssetGroup(cfg, customerId, campaignId, name, finalUrls, assets) {
     const customer = getCustomer(cfg, customerId);
-    return customer.assetGroups.create([
+    const assetGroupResourceName = ResourceNames.assetGroup(customerId, '-1');
+    return customer.mutateResources([
         {
-            campaign: ResourceNames.campaign(customerId, campaignId),
-            name,
-            final_urls: finalUrls,
-            status: enums.AssetGroupStatus.PAUSED,
+            entity: 'asset_group',
+            operation: 'create',
+            resource: {
+                resource_name: assetGroupResourceName,
+                campaign: ResourceNames.campaign(customerId, campaignId),
+                name,
+                final_urls: finalUrls,
+                status: enums.AssetGroupStatus.PAUSED,
+            },
         },
+        ...assets.map((asset) => ({
+            entity: 'asset_group_asset',
+            operation: 'create',
+            resource: {
+                asset_group: assetGroupResourceName,
+                asset: ResourceNames.asset(customerId, asset.assetId),
+                field_type: enums.AssetFieldType[asset.fieldType],
+            },
+        })),
     ]);
 }
 export async function createAssetGroupAssets(cfg, customerId, assetGroupId, assets) {

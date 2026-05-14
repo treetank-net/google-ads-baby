@@ -39,7 +39,8 @@ All creation flows should default to safe inactive states:
 - Validate responsive display image asset dimensions before ad prepare.
 - Clone supported ads through a generic `prepare_clone_entity` flow.
 - Create paused Performance Max campaigns.
-- Create paused Performance Max asset groups.
+- Create paused Performance Max asset groups together with their required
+  initial creative assets.
 - Link existing assets to Performance Max asset groups, including text, image,
   video, and call-to-action asset field types.
 
