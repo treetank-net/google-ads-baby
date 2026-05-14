@@ -5,7 +5,12 @@ export function registerAuthTools(server, cfg) {
         return {
             content: [{
                     type: 'text',
-                    text: 'Opening a browser for Google Ads login. After authorization and configuration in the browser, type anything here.',
+                    text: [
+                        'Opening a browser for Google Ads login.',
+                        'If no browser window appeared, open this URL manually:',
+                        url,
+                        'After authorization and configuration in the browser, type anything here.',
+                    ].join('\n'),
                 }],
         };
     });
