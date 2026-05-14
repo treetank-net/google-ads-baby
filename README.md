@@ -125,6 +125,7 @@ Read:
 - `list_accounts`
 - `get_campaigns`
 - `list_ads_entities`
+- `get_ad_blueprint`
 - `execute_gaql`
 
 Write preparation:
