@@ -277,3 +277,42 @@ export async function createResponsiveDisplayAd(
     } as any,
   ]);
 }
+
+export async function uploadImageAssetFromUrl(
+  cfg: AdsConfig,
+  customerId: string,
+  assetName: string,
+  imageUrl: string,
+  maxImageBytes: number,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    throw new Error(`Image download failed: HTTP ${response.status} from ${imageUrl}`);
+  }
+
+  const contentLength = Number(response.headers.get('content-length') || '');
+  if (Number.isFinite(contentLength) && contentLength > maxImageBytes) {
+    throw new Error(`Image is too large (${contentLength} bytes). Max allowed: ${maxImageBytes} bytes.`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().startsWith('image/')) {
+    throw new Error(`URL does not look like an image (content-type: ${contentType || 'unknown'}).`);
+  }
+
+  const data = Buffer.from(await response.arrayBuffer());
+  if (!data.length) {
+    throw new Error('Downloaded image is empty.');
+  }
+  if (data.length > maxImageBytes) {
+    throw new Error(`Image is too large (${data.length} bytes). Max allowed: ${maxImageBytes} bytes.`);
+  }
+
+  return customer.assets.create([
+    {
+      name: assetName,
+      image_asset: { data },
+    } as any,
+  ]);
+}

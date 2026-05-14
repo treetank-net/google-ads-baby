@@ -11,12 +11,14 @@ import {
   mutateCampaignBudget,
   mutateCampaignStatus,
   removeCampaigns,
+  uploadImageAssetFromUrl,
 } from '../client.js';
 import { createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
+const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
@@ -178,6 +180,33 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const normalizedBudgetId = normalizeResourceId(budget_id);
       const preview = `Change budget of campaign "${campaign_name}": ${current_budget_pln} -> ${new_budget_pln} PLN/day (account ${normalizedCustomerId})`;
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_image_asset_from_url',
+    'Prepare upload of an image asset from a public URL. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      asset_name: z.string().min(1).max(255).describe('Name for the new image asset'),
+      image_url: z.string().url().describe('Public image URL'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, asset_name, image_url, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = [
+        `Upload image asset "${asset_name}" on account ${normalizedCustomerId}`,
+        `Source URL: ${image_url}`,
+        `Safety cap: max ${MAX_IMAGE_BYTES} bytes`,
+      ].join('\n');
+      const mutation = createToken('image_asset_upload_from_url', {
+        customer_id: normalizedCustomerId,
+        asset_name,
+        image_url,
+      }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
   );
@@ -480,6 +509,17 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
             p.marketing_image_asset_ids,
             p.square_marketing_image_asset_ids,
             p.logo_image_asset_ids,
+          );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'image_asset_upload_from_url') {
+          const result = await uploadImageAssetFromUrl(
+            cfg,
+            p.customer_id,
+            p.asset_name,
+            p.image_url,
+            MAX_IMAGE_BYTES,
           );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
