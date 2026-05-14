@@ -173,6 +173,55 @@ export async function createResponsiveSearchAd(cfg, customerId, adGroupId, headl
         },
     ]);
 }
+export async function createKeywords(cfg, customerId, adGroupId, keywords) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.adGroupCriteria.create(keywords.map((keyword) => ({
+        ad_group: ResourceNames.adGroup(customerId, adGroupId),
+        status: enums.AdGroupCriterionStatus.ENABLED,
+        keyword: {
+            text: keyword.text,
+            match_type: enums.KeywordMatchType[keyword.matchType],
+        },
+    })));
+}
+export async function createNegativeKeywords(cfg, customerId, target, keywords) {
+    const customer = getCustomer(cfg, customerId);
+    if (target.level === 'campaign') {
+        return customer.campaignCriteria.create(keywords.map((keyword) => ({
+            campaign: ResourceNames.campaign(customerId, target.campaignId),
+            negative: true,
+            keyword: {
+                text: keyword.text,
+                match_type: enums.KeywordMatchType[keyword.matchType],
+            },
+        })));
+    }
+    return customer.adGroupCriteria.create(keywords.map((keyword) => ({
+        ad_group: ResourceNames.adGroup(customerId, target.adGroupId),
+        negative: true,
+        keyword: {
+            text: keyword.text,
+            match_type: enums.KeywordMatchType[keyword.matchType],
+        },
+    })));
+}
+export async function createCampaignTargeting(cfg, customerId, campaignId, targeting) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.campaignCriteria.create([
+        ...targeting.locationCriterionIds.map((criterionId) => ({
+            campaign: ResourceNames.campaign(customerId, campaignId),
+            location: {
+                geo_target_constant: ResourceNames.geoTargetConstant(criterionId),
+            },
+        })),
+        ...targeting.languageCriterionIds.map((criterionId) => ({
+            campaign: ResourceNames.campaign(customerId, campaignId),
+            language: {
+                language_constant: ResourceNames.languageConstant(criterionId),
+            },
+        })),
+    ]);
+}
 export async function createResponsiveDisplayAd(cfg, customerId, adGroupId, businessName, headlines, longHeadline, descriptions, finalUrl, marketingImageAssetIds, squareMarketingImageAssetIds, logoImageAssetIds) {
     const customer = getCustomer(cfg, customerId);
     return customer.adGroupAds.create([

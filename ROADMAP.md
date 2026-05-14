@@ -20,43 +20,37 @@ All creation flows should default to safe inactive states:
 
 - List accessible accounts.
 - Run read-only GAQL.
+- List campaigns, ad groups, ads, assets, and ad-asset links with filters.
+- Build clone-ready ad blueprints for responsive search/display ads.
 - Prepare and confirm campaign status changes.
 - Prepare and confirm campaign removal.
 - Prepare and confirm budget changes.
 - Create paused Search campaigns.
 - Create paused Search ad groups.
 - Create paused responsive search ads.
+- Create Search keywords for exact, phrase, and broad match.
+- Create campaign-level and ad-group-level negative keywords.
+- Add campaign location and language targeting.
+- Create paused Display campaigns.
+- Create paused Display ad groups.
+- Upload image assets from local files or public URLs.
+- Create paused responsive display ads with text and image assets.
+- Clone supported ads through a generic `prepare_clone_entity` flow.
 
 ## Target Coverage
 
 ### Search
 
-- Add keyword creation for exact, phrase, and broad match.
-- Add negative keywords.
 - Add Dynamic Search Ads support.
-- Add location and language targeting.
-- Add stronger validation for responsive search ad headline and description
-  lengths.
 
 ### Display
 
-- Add paused Display campaign creation.
-- Add paused Display ad group creation.
-- Add responsive display ad creation.
-- Support text fields used by responsive display ads:
-  - business name
-  - headlines
-  - long headline
-  - descriptions
-  - final URLs
-- Support image references for:
-  - marketing images
-  - square marketing images
-  - logo images
+- Validate responsive display image dimensions and aspect ratios before prepare.
+- Add clone support for more display-like ad formats when discovered in real
+  accounts.
 
 ### Image Assets
 
-- Add image asset upload from local files or URLs.
 - Validate image dimensions, file size, and aspect ratios before prepare.
 - Return previews with asset names, dimensions, and intended usage.
 - Reuse existing image assets by resource name when requested.
@@ -85,12 +79,10 @@ All creation flows should default to safe inactive states:
 
 ## Implementation Order
 
-1. Harden the existing Search flow with keywords and validation.
-2. Add image asset upload and reuse.
-3. Add responsive display ads.
-4. Add Display campaign and ad group creation.
-5. Add Performance Max campaign, asset group, and asset group assets.
-6. Explore Video and Demand Gen creation.
+1. Harden Display/Image validation, especially image dimensions and aspect
+   ratios.
+2. Add Performance Max campaign, asset group, and asset group assets.
+3. Explore Video and Demand Gen creation.
 
 ## Safety Requirements
 

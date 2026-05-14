@@ -141,6 +141,9 @@ Write preparation:
 - `prepare_display_ad_group`
 - `prepare_responsive_search_ad`
 - `prepare_responsive_display_ad`
+- `prepare_keywords`
+- `prepare_negative_keywords`
+- `prepare_campaign_targeting`
 - `prepare_clone_entity`
 
 Execution:

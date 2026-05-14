@@ -1,11 +1,13 @@
 import { z } from 'zod';
-import { createAdGroup, createDisplayAdGroup, createDisplayCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
+import { createAdGroup, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
 const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
+const MAX_KEYWORDS_PER_MUTATION = 100;
+const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
 const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
     .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
@@ -16,6 +18,13 @@ const campaignRefSchema = z.object({
 const displayAssetIdListSchema = z.array(z.string()).min(1).max(15);
 const displayLogoAssetIdListSchema = z.array(z.string()).max(5);
 const cloneEntitySchema = z.enum(['ad', 'ad_group', 'campaign']);
+const keywordMatchTypeSchema = z.enum(['BROAD', 'PHRASE', 'EXACT']);
+const keywordSchema = z.object({
+    text: z.string().min(1).max(80).describe('Keyword text, max 80 chars'),
+    match_type: keywordMatchTypeSchema.describe('Keyword match type'),
+});
+const negativeKeywordLevelSchema = z.enum(['campaign', 'ad_group']);
+const criterionIdListSchema = z.array(z.string().regex(/^\d+$/, 'Criterion IDs must be numeric')).max(MAX_TARGETING_CRITERIA_PER_MUTATION);
 function validationResult(message) {
     return { content: [{ type: 'text', text: `Error: ${message}` }] };
 }
@@ -83,8 +92,12 @@ function buildCloneAdQuery(filter) {
 function validateResponsiveSearchInput(headlines, descriptions) {
     if (headlines.length < 3 || headlines.length > 15)
         return 'Responsive search ad clone needs 3-15 headlines.';
+    if (headlines.some((headline) => headline.length > 30))
+        return 'Responsive search ad headlines must be max 30 chars each.';
     if (descriptions.length < 2 || descriptions.length > 4)
         return 'Responsive search ad clone needs 2-4 descriptions.';
+    if (descriptions.some((description) => description.length > 90))
+        return 'Responsive search ad descriptions must be max 90 chars each.';
     return null;
 }
 function validateResponsiveDisplayInput(input) {
@@ -368,8 +381,8 @@ export function registerWriteTools(server, cfg) {
     server.tool('prepare_responsive_search_ad', 'Prepare creation of a paused responsive search ad under an existing ad group. Returns a preview and confirmation token.', {
         customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
         ad_group_id: z.string().describe('Existing ad group ID'),
-        headlines: z.array(z.string().min(1)).min(3).max(15).describe('3-15 responsive search ad headlines'),
-        descriptions: z.array(z.string().min(1)).min(2).max(4).describe('2-4 responsive search ad descriptions'),
+        headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('3-15 responsive search ad headlines, max 30 chars each'),
+        descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('2-4 responsive search ad descriptions, max 90 chars each'),
         final_url: z.string().url().describe('Landing page URL'),
         safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
     }, async ({ customer_id, ad_group_id, headlines, descriptions, final_url, safe_word }) => {
@@ -436,6 +449,109 @@ export function registerWriteTools(server, cfg) {
             marketing_image_asset_ids: normalizedMarketingImageAssetIds,
             square_marketing_image_asset_ids: normalizedSquareMarketingImageAssetIds,
             logo_image_asset_ids: normalizedLogoImageAssetIds,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('prepare_keywords', 'Prepare creation of enabled search keywords in an existing ad group. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        ad_group_id: z.string().describe('Existing Search ad group ID'),
+        keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, ad_group_id, keywords, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+        const normalizedKeywords = keywords.map((keyword) => ({
+            text: keyword.text.trim(),
+            match_type: keyword.match_type,
+        }));
+        const uniqueKeys = new Set(normalizedKeywords.map((keyword) => `${keyword.match_type}:${keyword.text.toLowerCase()}`));
+        if (uniqueKeys.size !== normalizedKeywords.length) {
+            return validationResult('Duplicate keywords in the request. Remove duplicates before prepare.');
+        }
+        const preview = [
+            `Create ${normalizedKeywords.length} enabled keyword(s) in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
+            ...normalizedKeywords.map((keyword) => `- ${keyword.match_type}: ${keyword.text}`),
+        ].join('\n');
+        const mutation = createToken('keywords_create', {
+            customer_id: normalizedCustomerId,
+            ad_group_id: normalizedAdGroupId,
+            keywords: normalizedKeywords,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('prepare_negative_keywords', 'Prepare creation of negative keywords at campaign or ad group level. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        level: negativeKeywordLevelSchema.describe('Where to add negatives: campaign or ad_group'),
+        campaign_id: z.string().optional().describe('Campaign ID, required when level=campaign'),
+        ad_group_id: z.string().optional().describe('Ad group ID, required when level=ad_group'),
+        keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Negative keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, level, campaign_id, ad_group_id, keywords, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        if (level === 'campaign' && !campaign_id)
+            return validationResult('campaign_id is required when level=campaign.');
+        if (level === 'ad_group' && !ad_group_id)
+            return validationResult('ad_group_id is required when level=ad_group.');
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedCampaignId = campaign_id ? normalizeResourceId(campaign_id) : undefined;
+        const normalizedAdGroupId = ad_group_id ? normalizeResourceId(ad_group_id) : undefined;
+        const targetId = level === 'campaign' ? normalizedCampaignId : normalizedAdGroupId;
+        const normalizedKeywords = keywords.map((keyword) => ({
+            text: keyword.text.trim(),
+            match_type: keyword.match_type,
+        }));
+        const uniqueKeys = new Set(normalizedKeywords.map((keyword) => `${keyword.match_type}:${keyword.text.toLowerCase()}`));
+        if (uniqueKeys.size !== normalizedKeywords.length) {
+            return validationResult('Duplicate negative keywords in the request. Remove duplicates before prepare.');
+        }
+        const preview = [
+            `Create ${normalizedKeywords.length} negative keyword(s) at ${level} ${targetId}, account ${normalizedCustomerId}`,
+            ...normalizedKeywords.map((keyword) => `- ${keyword.match_type}: ${keyword.text}`),
+        ].join('\n');
+        const mutation = createToken('negative_keywords_create', {
+            customer_id: normalizedCustomerId,
+            level,
+            campaign_id: normalizedCampaignId,
+            ad_group_id: normalizedAdGroupId,
+            keywords: normalizedKeywords,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('prepare_campaign_targeting', 'Prepare adding location and language targeting criteria to a campaign. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        campaign_id: z.string().describe('Existing campaign ID'),
+        location_criterion_ids: criterionIdListSchema.default([]).describe('Geo target constant criterion IDs, e.g. 2616 for Poland'),
+        language_criterion_ids: criterionIdListSchema.default([]).describe('Language constant criterion IDs, e.g. 1045 for Polish, 1000 for English'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, campaign_id, location_criterion_ids, language_criterion_ids, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        if (location_criterion_ids.length + language_criterion_ids.length < 1) {
+            return validationResult('Provide at least one location_criterion_id or language_criterion_id.');
+        }
+        if (location_criterion_ids.length + language_criterion_ids.length > MAX_TARGETING_CRITERIA_PER_MUTATION) {
+            return validationResult(`Too many targeting criteria. Max ${MAX_TARGETING_CRITERIA_PER_MUTATION}.`);
+        }
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedCampaignId = normalizeResourceId(campaign_id);
+        const uniqueLocations = [...new Set(location_criterion_ids.map(normalizeResourceId))];
+        const uniqueLanguages = [...new Set(language_criterion_ids.map(normalizeResourceId))];
+        const preview = [
+            `Add campaign targeting to campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
+            `Location criterion IDs: ${uniqueLocations.length ? uniqueLocations.join(', ') : '(none)'}`,
+            `Language criterion IDs: ${uniqueLanguages.length ? uniqueLanguages.join(', ') : '(none)'}`,
+        ].join('\n');
+        const mutation = createToken('campaign_targeting_create', {
+            customer_id: normalizedCustomerId,
+            campaign_id: normalizedCampaignId,
+            location_criterion_ids: uniqueLocations,
+            language_criterion_ids: uniqueLanguages,
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
@@ -614,6 +730,30 @@ export function registerWriteTools(server, cfg) {
             }
             if (mutation.action === 'responsive_display_ad_create') {
                 const result = await createResponsiveDisplayAd(cfg, p.customer_id, p.ad_group_id, p.business_name, p.headlines, p.long_headline, p.descriptions, p.final_url, p.marketing_image_asset_ids, p.square_marketing_image_asset_ids, p.logo_image_asset_ids);
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'keywords_create') {
+                const result = await createKeywords(cfg, p.customer_id, p.ad_group_id, p.keywords.map((keyword) => ({
+                    text: keyword.text,
+                    matchType: keyword.match_type,
+                })));
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'negative_keywords_create') {
+                const target = p.level === 'campaign'
+                    ? { level: 'campaign', campaignId: p.campaign_id }
+                    : { level: 'ad_group', adGroupId: p.ad_group_id };
+                const result = await createNegativeKeywords(cfg, p.customer_id, target, p.keywords.map((keyword) => ({
+                    text: keyword.text,
+                    matchType: keyword.match_type,
+                })));
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'campaign_targeting_create') {
+                const result = await createCampaignTargeting(cfg, p.customer_id, p.campaign_id, {
+                    locationCriterionIds: p.location_criterion_ids,
+                    languageCriterionIds: p.language_criterion_ids,
+                });
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'image_asset_upload_from_url') {
