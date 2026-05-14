@@ -78,6 +78,12 @@ export function getPendingToken(token) {
     return mutation;
 }
 export function confirmPendingSafeWord(token, providedSafeWord) {
+    if (process.env['GOOGLE_ADS_ENABLE_MANUAL_CONFIRM'] !== '1') {
+        return {
+            ok: false,
+            error: 'Manual safe word confirmation is disabled. Set GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1 only for local testing.',
+        };
+    }
     const mutation = getPendingToken(token);
     if (!mutation) {
         return { ok: false, error: 'Token is invalid or expired. Prepare the operation again using prepare_*.' };

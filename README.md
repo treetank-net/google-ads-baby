@@ -140,7 +140,7 @@ Write preparation:
 
 Execution:
 
-- `confirm_safe_word`
+- `confirm_safe_word` (test-only; requires `GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1`)
 - `confirm_mutation`
 - `list_pending_mutations`
 

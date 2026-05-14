@@ -354,7 +354,7 @@ export function registerWriteTools(server, cfg) {
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
-    server.tool('confirm_safe_word', 'Confirm safe word for a prepared operation. Use when client hooks are unavailable; after this call, confirm_mutation can proceed for the same token.', {
+    server.tool('confirm_safe_word', 'Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1. Normal use should rely on user-message hooks.', {
         token: z.string().describe('Confirmation token from prepare_* response'),
         safe_word: z.string().min(1).describe('Exact safe word shown in prepare_* response'),
     }, async ({ token, safe_word }) => {
