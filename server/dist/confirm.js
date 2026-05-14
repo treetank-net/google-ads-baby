@@ -77,6 +77,24 @@ export function getPendingToken(token) {
     }
     return mutation;
 }
+export function confirmPendingSafeWord(token, providedSafeWord) {
+    const mutation = getPendingToken(token);
+    if (!mutation) {
+        return { ok: false, error: 'Token is invalid or expired. Prepare the operation again using prepare_*.' };
+    }
+    const provided = providedSafeWord.trim();
+    if (!provided) {
+        return { ok: false, error: 'Missing safe word. Reply with the exact safe word from prepare_*.' };
+    }
+    const expected = mutation.safeWord.trim();
+    if (provided.toLowerCase() !== expected.toLowerCase()) {
+        return { ok: false, error: 'Safe word does not match this pending operation.' };
+    }
+    const dir = getConfigDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(getConfirmStatePath(), `user-confirmed:${Math.floor(Date.now() / 1000)}`);
+    return { ok: true };
+}
 export function consumeConfirmState(mutation) {
     if (process.env['GOOGLE_ADS_SAFETY_LEVEL'] === 'off' || process.env['GOOGLE_ADS_YOLO'] === '1') {
         return { ok: true };

@@ -140,6 +140,7 @@ Write preparation:
 
 Execution:
 
+- `confirm_safe_word`
 - `confirm_mutation`
 - `list_pending_mutations`
 

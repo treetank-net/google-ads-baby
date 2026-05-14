@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createAdGroup, createDisplayAdGroup, createDisplayCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
-import { createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
@@ -353,6 +353,16 @@ export function registerWriteTools(server, cfg) {
             logo_image_asset_ids: normalizedLogoImageAssetIds,
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('confirm_safe_word', 'Confirm safe word for a prepared operation. Use when client hooks are unavailable; after this call, confirm_mutation can proceed for the same token.', {
+        token: z.string().describe('Confirmation token from prepare_* response'),
+        safe_word: z.string().min(1).describe('Exact safe word shown in prepare_* response'),
+    }, async ({ token, safe_word }) => {
+        const result = confirmPendingSafeWord(token, safe_word);
+        if (!result.ok) {
+            return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
+        }
+        return { content: [{ type: 'text', text: 'OK: Safe word confirmed for this token. You can now call confirm_mutation.' }] };
     });
     server.tool('confirm_mutation', 'Execute a previously prepared mutation. Requires a valid, non-expired token from a prepare_* call. The user MUST have explicitly confirmed the action.', {
         token: z.string().describe('Confirmation token from prepare_* response'),
