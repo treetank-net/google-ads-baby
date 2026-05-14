@@ -65,6 +65,11 @@ export function registerWriteTools(server, cfg) {
                 text: JSON.stringify({
                     safetyLevel: cfg.safetyLevel,
                     mutationTokenTtlSeconds: getTokenTtlSeconds(),
+                    manualSafeWordConfirmation: {
+                        enabled: process.env['GOOGLE_ADS_ENABLE_MANUAL_CONFIRM'] === '1',
+                        env: 'GOOGLE_ADS_ENABLE_MANUAL_CONFIRM',
+                        purpose: 'Test-only fallback for confirm_safe_word. Keep this set to 0/unset outside local testing so normal confirmation relies on user-message hooks.',
+                    },
                     serverSideProtection: 'Every write requires a prepare_* token. Tokens are server-side, one-shot, and time-limited.',
                     clientHookGate: safetyHookNotice(cfg),
                     codex: {

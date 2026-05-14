@@ -111,6 +111,8 @@ GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS
 GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS
 ```
 
+For local end-to-end tests only, `GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1` enables the `confirm_safe_word` fallback. Keep it unset or `0` for normal use so write confirmation goes through client hooks.
+
 ## Available Tools
 
 Setup:
