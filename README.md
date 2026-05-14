@@ -137,13 +137,16 @@ Write preparation:
 - `prepare_image_asset_from_url`
 - `prepare_search_campaign`
 - `prepare_display_campaign`
+- `prepare_performance_max_campaign`
 - `prepare_ad_group`
 - `prepare_display_ad_group`
+- `prepare_asset_group`
 - `prepare_responsive_search_ad`
 - `prepare_responsive_display_ad`
 - `prepare_keywords`
 - `prepare_negative_keywords`
 - `prepare_campaign_targeting`
+- `prepare_asset_group_assets`
 - `prepare_clone_entity`
 
 Execution:

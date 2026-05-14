@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { readFileSync, statSync } from 'fs';
-import { createAdGroup, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
+import { createAdGroup, createAssetGroup, createAssetGroupAssets, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createPerformanceMaxCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
@@ -9,6 +9,7 @@ const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
 const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 const MAX_KEYWORDS_PER_MUTATION = 100;
 const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
+const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
 const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
     .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
@@ -26,6 +27,19 @@ const keywordSchema = z.object({
 });
 const negativeKeywordLevelSchema = z.enum(['campaign', 'ad_group']);
 const criterionIdListSchema = z.array(z.string().regex(/^\d+$/, 'Criterion IDs must be numeric')).max(MAX_TARGETING_CRITERIA_PER_MUTATION);
+const assetFieldTypeSchema = z.enum([
+    'HEADLINE',
+    'LONG_HEADLINE',
+    'DESCRIPTION',
+    'BUSINESS_NAME',
+    'MARKETING_IMAGE',
+    'SQUARE_MARKETING_IMAGE',
+    'PORTRAIT_MARKETING_IMAGE',
+    'LOGO',
+    'LANDSCAPE_LOGO',
+    'YOUTUBE_VIDEO',
+    'CALL_TO_ACTION_SELECTION',
+]);
 function validationResult(message) {
     return { content: [{ type: 'text', text: `Error: ${message}` }] };
 }
@@ -207,6 +221,48 @@ async function fetchImageForPreview(url) {
     if (data.length > MAX_IMAGE_BYTES)
         throw new Error(`Image is too large (${data.length} bytes). Max allowed: ${MAX_IMAGE_BYTES} bytes.`);
     return { data, contentType: response.headers.get('content-type') || 'unknown' };
+}
+async function loadImageAssetInfo(cfg, customerId, assetIds) {
+    const uniqueIds = [...new Set(assetIds.map(normalizeResourceId))];
+    if (!uniqueIds.length)
+        return {};
+    const rows = await executeGaql(cfg, customerId, `
+    SELECT
+      asset.id,
+      asset.image_asset.full_size.url,
+      asset.image_asset.full_size.width_pixels,
+      asset.image_asset.full_size.height_pixels
+    FROM asset
+    WHERE asset.id IN (${uniqueIds.join(',')})
+  `);
+    const out = {};
+    for (const row of rows) {
+        const asset = row.asset ?? {};
+        out[String(asset.id)] = {
+            width: asset.image_asset?.full_size?.width_pixels,
+            height: asset.image_asset?.full_size?.height_pixels,
+            url: asset.image_asset?.full_size?.url,
+        };
+    }
+    return out;
+}
+function ratioOk(width, height, min, max) {
+    if (!width || !height)
+        return false;
+    const ratio = width / height;
+    return ratio >= min && ratio <= max;
+}
+function validateAssetPlacement(label, assetIds, info, minRatio, maxRatio) {
+    for (const assetId of assetIds) {
+        const dimensions = info[assetId];
+        if (!dimensions?.width || !dimensions.height)
+            return `${label} asset ${assetId} has no readable image dimensions.`;
+        if (!ratioOk(dimensions.width, dimensions.height, minRatio, maxRatio)) {
+            const ratio = Number((dimensions.width / dimensions.height).toFixed(4));
+            return `${label} asset ${assetId} has ratio ${ratio} (${dimensions.width}x${dimensions.height}); expected ${minRatio}-${maxRatio}.`;
+        }
+    }
+    return null;
 }
 function safetyHookNotice(cfg, safeWord) {
     if (cfg.safetyLevel === 'off') {
@@ -453,6 +509,28 @@ export function registerWriteTools(server, cfg) {
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
+    server.tool('prepare_performance_max_campaign', 'Prepare creation of a paused Performance Max campaign with a daily budget. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        campaign_name: z.string().min(1).describe('New campaign name'),
+        daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
+        if (budgetMicros > MAX_BUDGET_MICROS) {
+            return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
+        }
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const preview = `Create paused Performance Max campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
+        const mutation = createToken('performance_max_campaign_create', {
+            customer_id: normalizedCustomerId,
+            campaign_name,
+            daily_budget_micros: budgetMicros,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
     server.tool('prepare_ad_group', 'Prepare creation of a paused Search ad group under an existing campaign. Returns a preview and confirmation token.', {
         customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
         campaign_id: z.string().describe('Existing campaign ID'),
@@ -500,6 +578,30 @@ export function registerWriteTools(server, cfg) {
             campaign_id: normalizedCampaignId,
             ad_group_name,
             cpc_bid_micros: cpcMicros,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('prepare_asset_group', 'Prepare creation of a paused Performance Max asset group under an existing campaign. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        campaign_id: z.string().describe('Existing Performance Max campaign ID'),
+        asset_group_name: z.string().min(1).describe('New asset group name'),
+        final_urls: z.array(z.string().url()).min(1).max(20).describe('Landing page final URLs for the asset group'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, campaign_id, asset_group_name, final_urls, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedCampaignId = normalizeResourceId(campaign_id);
+        const preview = [
+            `Create paused asset group "${asset_group_name}" in campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
+            `Final URLs: ${final_urls.join(', ')}`,
+        ].join('\n');
+        const mutation = createToken('asset_group_create', {
+            customer_id: normalizedCustomerId,
+            campaign_id: normalizedCampaignId,
+            asset_group_name,
+            final_urls,
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
@@ -552,6 +654,16 @@ export function registerWriteTools(server, cfg) {
         const normalizedMarketingImageAssetIds = marketing_image_asset_ids.map(normalizeResourceId);
         const normalizedSquareMarketingImageAssetIds = square_marketing_image_asset_ids.map(normalizeResourceId);
         const normalizedLogoImageAssetIds = logo_image_asset_ids.map(normalizeResourceId);
+        const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, [
+            ...normalizedMarketingImageAssetIds,
+            ...normalizedSquareMarketingImageAssetIds,
+            ...normalizedLogoImageAssetIds,
+        ]);
+        const placementError = validateAssetPlacement('Marketing image', normalizedMarketingImageAssetIds, imageInfo, 1.75, 2.05)
+            || validateAssetPlacement('Square marketing image', normalizedSquareMarketingImageAssetIds, imageInfo, 0.95, 1.05)
+            || validateAssetPlacement('Logo image', normalizedLogoImageAssetIds, imageInfo, 1.0, 5.0);
+        if (placementError)
+            return validationResult(placementError);
         const preview = [
             `Create paused responsive display ad in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
             `Final URL: ${final_url}`,
@@ -680,6 +792,48 @@ export function registerWriteTools(server, cfg) {
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
+    server.tool('prepare_asset_group_assets', 'Prepare linking existing assets to a Performance Max asset group. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        asset_group_id: z.string().describe('Existing asset group ID'),
+        assets: z.array(z.object({
+            asset_id: z.string().describe('Existing asset ID'),
+            field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
+        })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Assets to link to the asset group'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, asset_group_id, assets, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedAssetGroupId = normalizeResourceId(asset_group_id);
+        const normalizedAssets = assets.map((asset) => ({
+            asset_id: normalizeResourceId(asset.asset_id),
+            field_type: asset.field_type,
+        }));
+        const unique = new Set(normalizedAssets.map((asset) => `${asset.asset_id}:${asset.field_type}`));
+        if (unique.size !== normalizedAssets.length)
+            return validationResult('Duplicate asset group asset links in request.');
+        const imageAssets = normalizedAssets.filter((asset) => ['MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'PORTRAIT_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO'].includes(asset.field_type));
+        const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((asset) => asset.asset_id));
+        const byField = (field) => imageAssets.filter((asset) => asset.field_type === field).map((asset) => asset.asset_id);
+        const placementError = validateAssetPlacement('Marketing image', byField('MARKETING_IMAGE'), imageInfo, 1.75, 2.05)
+            || validateAssetPlacement('Square marketing image', byField('SQUARE_MARKETING_IMAGE'), imageInfo, 0.95, 1.05)
+            || validateAssetPlacement('Portrait marketing image', byField('PORTRAIT_MARKETING_IMAGE'), imageInfo, 0.75, 0.85)
+            || validateAssetPlacement('Logo', byField('LOGO'), imageInfo, 0.95, 5.0)
+            || validateAssetPlacement('Landscape logo', byField('LANDSCAPE_LOGO'), imageInfo, 3.0, 5.0);
+        if (placementError)
+            return validationResult(placementError);
+        const preview = [
+            `Link ${normalizedAssets.length} asset(s) to asset group ${normalizedAssetGroupId}, account ${normalizedCustomerId}`,
+            ...normalizedAssets.map((asset) => `- ${asset.field_type}: ${asset.asset_id}`),
+        ].join('\n');
+        const mutation = createToken('asset_group_assets_create', {
+            customer_id: normalizedCustomerId,
+            asset_group_id: normalizedAssetGroupId,
+            assets: normalizedAssets,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
     server.tool('prepare_clone_entity', 'Prepare cloning a supported Google Ads entity as paused. Currently supports entity="ad" for responsive search/display ads.', {
         customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
         entity: cloneEntitySchema.describe('Entity kind to clone. Currently only ad is implemented.'),
@@ -734,6 +888,16 @@ export function registerWriteTools(server, cfg) {
                 const validationError = validateResponsiveDisplayInput(resolved);
                 if (validationError)
                     return validationResult(validationError);
+                const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, [
+                    ...resolved.marketingImageAssetIds,
+                    ...resolved.squareMarketingImageAssetIds,
+                    ...resolved.logoImageAssetIds,
+                ]);
+                const placementError = validateAssetPlacement('Marketing image', resolved.marketingImageAssetIds, imageInfo, 1.75, 2.05)
+                    || validateAssetPlacement('Square marketing image', resolved.squareMarketingImageAssetIds, imageInfo, 0.95, 1.05)
+                    || validateAssetPlacement('Logo image', resolved.logoImageAssetIds, imageInfo, 1.0, 5.0);
+                if (placementError)
+                    return validationResult(placementError);
                 const preview = [
                     `Clone responsive display ad ${ad.id} into paused ad in ad group ${normalizedTargetAdGroupId}, account ${normalizedCustomerId}`,
                     `Source: ${row.ad_group_ad?.resource_name}`,
@@ -841,12 +1005,20 @@ export function registerWriteTools(server, cfg) {
                 const result = await createDisplayCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
+            if (mutation.action === 'performance_max_campaign_create') {
+                const result = await createPerformanceMaxCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
             if (mutation.action === 'ad_group_create') {
                 const result = await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'display_ad_group_create') {
                 const result = await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'asset_group_create') {
+                const result = await createAssetGroup(cfg, p.customer_id, p.campaign_id, p.asset_group_name, p.final_urls);
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'responsive_search_ad_create') {
@@ -879,6 +1051,13 @@ export function registerWriteTools(server, cfg) {
                     locationCriterionIds: p.location_criterion_ids,
                     languageCriterionIds: p.language_criterion_ids,
                 });
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'asset_group_assets_create') {
+                const result = await createAssetGroupAssets(cfg, p.customer_id, p.asset_group_id, p.assets.map((asset) => ({
+                    assetId: asset.asset_id,
+                    fieldType: asset.field_type,
+                })));
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'image_asset_upload_from_url') {

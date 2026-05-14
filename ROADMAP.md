@@ -36,7 +36,12 @@ All creation flows should default to safe inactive states:
 - Upload image assets from local files or public URLs with dimension and aspect
   ratio previews.
 - Create paused responsive display ads with text and image assets.
+- Validate responsive display image asset dimensions before ad prepare.
 - Clone supported ads through a generic `prepare_clone_entity` flow.
+- Create paused Performance Max campaigns.
+- Create paused Performance Max asset groups.
+- Link existing assets to Performance Max asset groups, including text, image,
+  video, and call-to-action asset field types.
 
 ## Target Coverage
 
@@ -46,7 +51,6 @@ All creation flows should default to safe inactive states:
 
 ### Display
 
-- Validate responsive display image asset dimensions before ad prepare.
 - Add clone support for more display-like ad formats when discovered in real
   accounts.
 
@@ -58,20 +62,10 @@ All creation flows should default to safe inactive states:
 
 ### Performance Max
 
-- Add paused Performance Max campaign creation.
-- Add asset group creation.
-- Add asset group asset linking for:
-  - headlines
-  - long headlines
-  - descriptions
-  - business name
-  - marketing images
-  - square marketing images
-  - portrait marketing images
-  - logos
-  - landscape logos
-  - YouTube videos
-  - call-to-action selection
+- Add text asset creation helpers for PMax copy when no reusable text assets
+  exist yet.
+- Add asset group signal creation.
+- Add listing group support for feed-based PMax.
 
 ### Video And Demand Gen
 
@@ -80,9 +74,8 @@ All creation flows should default to safe inactive states:
 
 ## Implementation Order
 
-1. Harden Display/Image validation, especially image dimensions and aspect
-   ratios.
-2. Add Performance Max campaign, asset group, and asset group assets.
+1. Add text asset creation helpers for PMax copy.
+2. Add Performance Max asset group signals and listing groups.
 3. Explore Video and Demand Gen creation.
 
 ## Safety Requirements

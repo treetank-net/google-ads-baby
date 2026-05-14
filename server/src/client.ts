@@ -174,6 +174,40 @@ export async function createDisplayCampaign(
   ] as any);
 }
 
+export async function createPerformanceMaxCampaign(
+  cfg: AdsConfig,
+  customerId: string,
+  name: string,
+  dailyBudgetMicros: number,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const budgetResourceName = ResourceNames.campaignBudget(customerId, '-1');
+  return customer.mutateResources([
+    {
+      entity: 'campaign_budget',
+      operation: 'create',
+      resource: {
+        resource_name: budgetResourceName,
+        name: `${name} Budget`,
+        delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+        amount_micros: dailyBudgetMicros,
+      },
+    },
+    {
+      entity: 'campaign',
+      operation: 'create',
+      resource: {
+        name,
+        advertising_channel_type: enums.AdvertisingChannelType.PERFORMANCE_MAX,
+        status: enums.CampaignStatus.PAUSED,
+        campaign_budget: budgetResourceName,
+        maximize_conversion_value: {},
+        contains_eu_political_advertising: enums.EuPoliticalAdvertisingStatus.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING,
+      },
+    },
+  ] as any);
+}
+
 export async function createAdGroup(
   cfg: AdsConfig,
   customerId: string,
@@ -306,6 +340,38 @@ export async function createCampaignTargeting(
       },
     }) as any),
   ]);
+}
+
+export async function createAssetGroup(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  name: string,
+  finalUrls: string[],
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assetGroups.create([
+    {
+      campaign: ResourceNames.campaign(customerId, campaignId),
+      name,
+      final_urls: finalUrls,
+      status: enums.AssetGroupStatus.PAUSED,
+    } as any,
+  ]);
+}
+
+export async function createAssetGroupAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  assetGroupId: string,
+  assets: Array<{ assetId: string; fieldType: string }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assetGroupAssets.create(assets.map((asset) => ({
+    asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+    asset: ResourceNames.asset(customerId, asset.assetId),
+    field_type: (enums.AssetFieldType as any)[asset.fieldType],
+  }) as any));
 }
 
 export async function createResponsiveDisplayAd(

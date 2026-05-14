@@ -132,6 +132,34 @@ export async function createDisplayCampaign(cfg, customerId, name, dailyBudgetMi
         },
     ]);
 }
+export async function createPerformanceMaxCampaign(cfg, customerId, name, dailyBudgetMicros) {
+    const customer = getCustomer(cfg, customerId);
+    const budgetResourceName = ResourceNames.campaignBudget(customerId, '-1');
+    return customer.mutateResources([
+        {
+            entity: 'campaign_budget',
+            operation: 'create',
+            resource: {
+                resource_name: budgetResourceName,
+                name: `${name} Budget`,
+                delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+                amount_micros: dailyBudgetMicros,
+            },
+        },
+        {
+            entity: 'campaign',
+            operation: 'create',
+            resource: {
+                name,
+                advertising_channel_type: enums.AdvertisingChannelType.PERFORMANCE_MAX,
+                status: enums.CampaignStatus.PAUSED,
+                campaign_budget: budgetResourceName,
+                maximize_conversion_value: {},
+                contains_eu_political_advertising: enums.EuPoliticalAdvertisingStatus.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING,
+            },
+        },
+    ]);
+}
 export async function createAdGroup(cfg, customerId, campaignId, name, cpcBidMicros) {
     const customer = getCustomer(cfg, customerId);
     return customer.adGroups.create([
@@ -221,6 +249,25 @@ export async function createCampaignTargeting(cfg, customerId, campaignId, targe
             },
         })),
     ]);
+}
+export async function createAssetGroup(cfg, customerId, campaignId, name, finalUrls) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.assetGroups.create([
+        {
+            campaign: ResourceNames.campaign(customerId, campaignId),
+            name,
+            final_urls: finalUrls,
+            status: enums.AssetGroupStatus.PAUSED,
+        },
+    ]);
+}
+export async function createAssetGroupAssets(cfg, customerId, assetGroupId, assets) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.assetGroupAssets.create(assets.map((asset) => ({
+        asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+        asset: ResourceNames.asset(customerId, asset.assetId),
+        field_type: enums.AssetFieldType[asset.fieldType],
+    })));
 }
 export async function createResponsiveDisplayAd(cfg, customerId, adGroupId, businessName, headlines, longHeadline, descriptions, finalUrl, marketingImageAssetIds, squareMarketingImageAssetIds, logoImageAssetIds) {
     const customer = getCustomer(cfg, customerId);
