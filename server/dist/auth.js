@@ -236,6 +236,16 @@ export function startAuthFlow(cfg) {
             }
             return;
         }
+        if (url.pathname === '/open') {
+            const target = oauthState?.authUrl;
+            if (!target) {
+                html(404, '<h1>Authorization flow not active</h1>');
+                return;
+            }
+            res.writeHead(302, { Location: target });
+            res.end();
+            return;
+        }
         if (url.pathname === '/list-accounts' && req.method === 'POST') {
             try {
                 const body = JSON.parse(await readBody(req));
@@ -289,7 +299,6 @@ export function startAuthFlow(cfg) {
         res.end('Not found');
     });
     server.listen(port, '127.0.0.1');
-    oauthState = { server, port, stateParam, resolved: false, cfg };
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     authUrl.searchParams.set('client_id', cfg.clientId);
     authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -299,8 +308,9 @@ export function startAuthFlow(cfg) {
     authUrl.searchParams.set('prompt', 'consent');
     authUrl.searchParams.set('state', stateParam);
     const url = authUrl.toString();
+    oauthState = { server, port, stateParam, authUrl: url, resolved: false, cfg };
     openBrowser(url);
-    return { url, port };
+    return { url, shortUrl: `http://127.0.0.1:${port}/open`, port };
 }
 export function checkAuthStatus() {
     return { done: oauthState?.resolved ?? false };

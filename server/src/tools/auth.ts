@@ -8,13 +8,15 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
     'Start Google OAuth flow. Returns a URL for the user to click. After authorization the refresh token is saved automatically.',
     {},
     async () => {
-      const { url } = startAuthFlow(cfg);
+      const { url, shortUrl } = startAuthFlow(cfg);
       return {
         content: [{
           type: 'text',
           text: [
             'Opening a browser for Google Ads login.',
-            'If no browser window appeared, open this URL manually:',
+            'If no browser window appeared, open this short local URL manually:',
+            shortUrl,
+            'Direct Google OAuth URL:',
             url,
             'After authorization and configuration in the browser, type anything here.',
           ].join('\n'),
