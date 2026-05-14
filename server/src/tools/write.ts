@@ -7,7 +7,7 @@ import {
   createSearchCampaign,
   mutateCampaignBudget,
   mutateCampaignStatus,
-  mutateCampaignStatuses,
+  removeCampaigns,
 } from '../client.js';
 import { createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
@@ -120,7 +120,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'prepare_campaign_removal',
-    'Prepare removal of one or more campaigns by setting status to REMOVED. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Prepare removal of one or more campaigns. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       campaigns: z.array(campaignRefSchema).min(1).max(20).describe('Campaigns to remove'),
@@ -304,10 +304,10 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         }
 
         if (mutation.action === 'campaign_removal') {
-          const result = await mutateCampaignStatuses(
+          const result = await removeCampaigns(
             cfg,
             p.customer_id,
-            p.campaigns.map((campaign: any) => ({ campaignId: campaign.campaign_id, status: 'REMOVED' })),
+            p.campaigns.map((campaign: any) => campaign.campaign_id),
           );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }

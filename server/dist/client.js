@@ -56,6 +56,10 @@ export async function mutateCampaignStatuses(cfg, customerId, campaigns) {
         status: enums.CampaignStatus[status],
     })));
 }
+export async function removeCampaigns(cfg, customerId, campaignIds) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.campaigns.remove(campaignIds.map((campaignId) => (`customers/${customerId}/campaigns/${campaignId}`)));
+}
 export async function mutateCampaignBudget(cfg, customerId, budgetId, amountMicros) {
     const customer = getCustomer(cfg, customerId);
     return customer.campaignBudgets.update([

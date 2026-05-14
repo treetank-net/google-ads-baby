@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createAdGroup, createResponsiveSearchAd, createSearchCampaign, mutateCampaignBudget, mutateCampaignStatus, mutateCampaignStatuses, } from '../client.js';
+import { createAdGroup, createResponsiveSearchAd, createSearchCampaign, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, } from '../client.js';
 import { createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
@@ -90,7 +90,7 @@ export function registerWriteTools(server, cfg) {
         const mutation = createToken('campaign_status', { customer_id: normalizedCustomerId, campaign_id: normalizedCampaignId, new_status }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
-    server.tool('prepare_campaign_removal', 'Prepare removal of one or more campaigns by setting status to REMOVED. Returns a preview and confirmation token. The user MUST confirm before the change is applied.', {
+    server.tool('prepare_campaign_removal', 'Prepare removal of one or more campaigns. Returns a preview and confirmation token. The user MUST confirm before the change is applied.', {
         customer_id: z.string().describe('Google Ads customer ID'),
         campaigns: z.array(campaignRefSchema).min(1).max(20).describe('Campaigns to remove'),
         safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
@@ -242,7 +242,7 @@ export function registerWriteTools(server, cfg) {
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.` }] };
             }
             if (mutation.action === 'campaign_removal') {
-                const result = await mutateCampaignStatuses(cfg, p.customer_id, p.campaigns.map((campaign) => ({ campaignId: campaign.campaign_id, status: 'REMOVED' })));
+                const result = await removeCampaigns(cfg, p.customer_id, p.campaigns.map((campaign) => campaign.campaign_id));
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'budget_change') {

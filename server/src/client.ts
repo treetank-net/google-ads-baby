@@ -56,7 +56,7 @@ export async function mutateCampaignStatus(
   cfg: AdsConfig,
   customerId: string,
   campaignId: string,
-  status: 'ENABLED' | 'PAUSED' | 'REMOVED',
+  status: 'ENABLED' | 'PAUSED',
 ): Promise<unknown> {
   return mutateCampaignStatuses(cfg, customerId, [{ campaignId, status }]);
 }
@@ -64,13 +64,24 @@ export async function mutateCampaignStatus(
 export async function mutateCampaignStatuses(
   cfg: AdsConfig,
   customerId: string,
-  campaigns: Array<{ campaignId: string; status: 'ENABLED' | 'PAUSED' | 'REMOVED' }>,
+  campaigns: Array<{ campaignId: string; status: 'ENABLED' | 'PAUSED' }>,
 ): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
   return customer.campaigns.update(campaigns.map(({ campaignId, status }) => ({
     resource_name: `customers/${customerId}/campaigns/${campaignId}`,
     status: enums.CampaignStatus[status],
   })));
+}
+
+export async function removeCampaigns(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignIds: string[],
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.campaigns.remove(campaignIds.map((campaignId) => (
+    `customers/${customerId}/campaigns/${campaignId}`
+  )));
 }
 
 export async function mutateCampaignBudget(
