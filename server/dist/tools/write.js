@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { createAdGroup, createDisplayAdGroup, createDisplayCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
+import { createAdGroup, createDisplayAdGroup, createDisplayCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import { formatError } from '../errors.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
@@ -14,6 +15,7 @@ const campaignRefSchema = z.object({
 });
 const displayAssetIdListSchema = z.array(z.string()).min(1).max(15);
 const displayLogoAssetIdListSchema = z.array(z.string()).max(5);
+const cloneEntitySchema = z.enum(['ad', 'ad_group', 'campaign']);
 function validationResult(message) {
     return { content: [{ type: 'text', text: `Error: ${message}` }] };
 }
@@ -23,6 +25,84 @@ function validateCustomer(customerId) {
 }
 function normalizeSafeWord(safeWord) {
     return safeWord.trim();
+}
+function gaqlString(value) {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+function resourceNameLiteral(value) {
+    return `'${gaqlString(value.trim())}'`;
+}
+function adFilter(sourceAdId, sourceAdGroupAdResourceName) {
+    if (sourceAdGroupAdResourceName?.trim()) {
+        return `ad_group_ad.resource_name = ${resourceNameLiteral(sourceAdGroupAdResourceName)}`;
+    }
+    if (sourceAdId?.trim()) {
+        return `ad_group_ad.ad.id = ${normalizeResourceId(sourceAdId)}`;
+    }
+    return null;
+}
+function assetIdFromResourceName(resourceName) {
+    const match = resourceName?.match(/\/assets\/(\d+)$/);
+    return match ? match[1] : null;
+}
+function textValues(items) {
+    return (items ?? []).map((item) => item.text).filter((value) => Boolean(value));
+}
+function assetIds(items) {
+    return (items ?? [])
+        .map((item) => assetIdFromResourceName(item.asset))
+        .filter((value) => Boolean(value));
+}
+function buildCloneAdQuery(filter) {
+    return `
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.advertising_channel_type,
+      ad_group.id,
+      ad_group.name,
+      ad_group_ad.resource_name,
+      ad_group_ad.status,
+      ad_group_ad.ad.id,
+      ad_group_ad.ad.type,
+      ad_group_ad.ad.final_urls,
+      ad_group_ad.ad.responsive_search_ad.headlines,
+      ad_group_ad.ad.responsive_search_ad.descriptions,
+      ad_group_ad.ad.responsive_display_ad.business_name,
+      ad_group_ad.ad.responsive_display_ad.headlines,
+      ad_group_ad.ad.responsive_display_ad.long_headline,
+      ad_group_ad.ad.responsive_display_ad.descriptions,
+      ad_group_ad.ad.responsive_display_ad.marketing_images,
+      ad_group_ad.ad.responsive_display_ad.square_marketing_images,
+      ad_group_ad.ad.responsive_display_ad.logo_images
+    FROM ad_group_ad
+    WHERE ${filter}
+    LIMIT 2
+  `;
+}
+function validateResponsiveSearchInput(headlines, descriptions) {
+    if (headlines.length < 3 || headlines.length > 15)
+        return 'Responsive search ad clone needs 3-15 headlines.';
+    if (descriptions.length < 2 || descriptions.length > 4)
+        return 'Responsive search ad clone needs 2-4 descriptions.';
+    return null;
+}
+function validateResponsiveDisplayInput(input) {
+    if (!input.businessName || input.businessName.length > 25)
+        return 'Responsive display ad clone needs a business name up to 25 chars.';
+    if (input.headlines.length < 1 || input.headlines.length > 5 || input.headlines.some((headline) => headline.length > 30))
+        return 'Responsive display ad clone needs 1-5 headlines, max 30 chars each.';
+    if (!input.longHeadline || input.longHeadline.length > 90)
+        return 'Responsive display ad clone needs a long headline up to 90 chars.';
+    if (input.descriptions.length < 1 || input.descriptions.length > 5 || input.descriptions.some((description) => description.length > 90))
+        return 'Responsive display ad clone needs 1-5 descriptions, max 90 chars each.';
+    if (input.marketingImageAssetIds.length < 1 || input.marketingImageAssetIds.length > 15)
+        return 'Responsive display ad clone needs 1-15 marketing image asset IDs.';
+    if (input.squareMarketingImageAssetIds.length < 1 || input.squareMarketingImageAssetIds.length > 15)
+        return 'Responsive display ad clone needs 1-15 square marketing image asset IDs.';
+    if (input.logoImageAssetIds.length > 5)
+        return 'Responsive display ad clone can use at most 5 logo image asset IDs.';
+    return null;
 }
 function safetyHookNotice(cfg, safeWord) {
     if (cfg.safetyLevel === 'off') {
@@ -358,6 +438,114 @@ export function registerWriteTools(server, cfg) {
             logo_image_asset_ids: normalizedLogoImageAssetIds,
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
+    });
+    server.tool('prepare_clone_entity', 'Prepare cloning a supported Google Ads entity as paused. Currently supports entity="ad" for responsive search/display ads.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        entity: cloneEntitySchema.describe('Entity kind to clone. Currently only ad is implemented.'),
+        source_ad_id: z.string().optional().describe('Source ad ID. Use this or source_ad_group_ad_resource_name for entity=ad.'),
+        source_ad_group_ad_resource_name: z.string().optional().describe('Full source ad group ad resource name, e.g. customers/123/adGroupAds/456~789. Preferred for entity=ad.'),
+        target_ad_group_id: z.string().optional().describe('Target ad group ID. Defaults to the source ad group for entity=ad.'),
+        final_url: z.string().url().optional().describe('Optional replacement landing page URL. Defaults to the source ad final URL.'),
+        business_name: z.string().min(1).max(25).optional().describe('Optional replacement business name for responsive display ads.'),
+        headlines: z.array(z.string().min(1)).optional().describe('Optional replacement headlines. Required counts depend on ad type.'),
+        long_headline: z.string().min(1).max(90).optional().describe('Optional replacement long headline for responsive display ads.'),
+        descriptions: z.array(z.string().min(1)).optional().describe('Optional replacement descriptions. Required counts depend on ad type.'),
+        marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement marketing image asset IDs for responsive display ads.'),
+        square_marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement square marketing image asset IDs for responsive display ads.'),
+        logo_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement logo image asset IDs for responsive display ads.'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, entity, source_ad_id, source_ad_group_ad_resource_name, target_ad_group_id, final_url, business_name, headlines, long_headline, descriptions, marketing_image_asset_ids, square_marketing_image_asset_ids, logo_image_asset_ids, safe_word, }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        if (entity !== 'ad') {
+            return validationResult(`Cloning ${entity} is not implemented yet. Use entity="ad".`);
+        }
+        const filter = adFilter(source_ad_id, source_ad_group_ad_resource_name);
+        if (!filter)
+            return validationResult('Provide source_ad_id or source_ad_group_ad_resource_name.');
+        try {
+            const normalizedCustomerId = normalizeCustomerId(customer_id);
+            const rows = await executeGaql(cfg, normalizedCustomerId, buildCloneAdQuery(filter));
+            if (rows.length === 0)
+                return validationResult('Source ad not found.');
+            if (rows.length > 1)
+                return validationResult('More than one source ad matched. Retry with source_ad_group_ad_resource_name.');
+            const row = rows[0];
+            const ad = row.ad_group_ad?.ad ?? {};
+            const sourceAdGroupId = String(row.ad_group?.id ?? '');
+            const normalizedTargetAdGroupId = normalizeResourceId(target_ad_group_id || sourceAdGroupId);
+            const resolvedFinalUrl = final_url || ad.final_urls?.[0];
+            if (!resolvedFinalUrl)
+                return validationResult('Source ad has no final URL. Provide final_url override.');
+            const responsiveDisplay = ad.responsive_display_ad;
+            const responsiveSearch = ad.responsive_search_ad;
+            if (responsiveDisplay) {
+                const resolved = {
+                    businessName: business_name || responsiveDisplay.business_name,
+                    headlines: headlines || textValues(responsiveDisplay.headlines),
+                    longHeadline: long_headline || responsiveDisplay.long_headline?.text,
+                    descriptions: descriptions || textValues(responsiveDisplay.descriptions),
+                    marketingImageAssetIds: (marketing_image_asset_ids || assetIds(responsiveDisplay.marketing_images)).map(normalizeResourceId),
+                    squareMarketingImageAssetIds: (square_marketing_image_asset_ids || assetIds(responsiveDisplay.square_marketing_images)).map(normalizeResourceId),
+                    logoImageAssetIds: (logo_image_asset_ids || assetIds(responsiveDisplay.logo_images)).map(normalizeResourceId),
+                };
+                const validationError = validateResponsiveDisplayInput(resolved);
+                if (validationError)
+                    return validationResult(validationError);
+                const preview = [
+                    `Clone responsive display ad ${ad.id} into paused ad in ad group ${normalizedTargetAdGroupId}, account ${normalizedCustomerId}`,
+                    `Source: ${row.ad_group_ad?.resource_name}`,
+                    `Final URL: ${resolvedFinalUrl}`,
+                    `Business name: ${resolved.businessName}`,
+                    `Headlines (${resolved.headlines.length}): ${resolved.headlines.join(' | ')}`,
+                    `Long headline: ${resolved.longHeadline}`,
+                    `Descriptions (${resolved.descriptions.length}): ${resolved.descriptions.join(' | ')}`,
+                    `Marketing image assets: ${resolved.marketingImageAssetIds.join(', ')}`,
+                    `Square marketing image assets: ${resolved.squareMarketingImageAssetIds.join(', ')}`,
+                    `Logo image assets: ${resolved.logoImageAssetIds.length ? resolved.logoImageAssetIds.join(', ') : '(none)'}`,
+                ].join('\n');
+                const mutation = createToken('responsive_display_ad_create', {
+                    customer_id: normalizedCustomerId,
+                    ad_group_id: normalizedTargetAdGroupId,
+                    business_name: resolved.businessName,
+                    headlines: resolved.headlines,
+                    long_headline: resolved.longHeadline,
+                    descriptions: resolved.descriptions,
+                    final_url: resolvedFinalUrl,
+                    marketing_image_asset_ids: resolved.marketingImageAssetIds,
+                    square_marketing_image_asset_ids: resolved.squareMarketingImageAssetIds,
+                    logo_image_asset_ids: resolved.logoImageAssetIds,
+                }, preview, normalizeSafeWord(safe_word));
+                return prepareResponse(cfg, mutation, preview);
+            }
+            if (responsiveSearch) {
+                const resolvedHeadlines = headlines || textValues(responsiveSearch.headlines);
+                const resolvedDescriptions = descriptions || textValues(responsiveSearch.descriptions);
+                const validationError = validateResponsiveSearchInput(resolvedHeadlines, resolvedDescriptions);
+                if (validationError)
+                    return validationResult(validationError);
+                const preview = [
+                    `Clone responsive search ad ${ad.id} into paused ad in ad group ${normalizedTargetAdGroupId}, account ${normalizedCustomerId}`,
+                    `Source: ${row.ad_group_ad?.resource_name}`,
+                    `Final URL: ${resolvedFinalUrl}`,
+                    `Headlines (${resolvedHeadlines.length}): ${resolvedHeadlines.join(' | ')}`,
+                    `Descriptions (${resolvedDescriptions.length}): ${resolvedDescriptions.join(' | ')}`,
+                ].join('\n');
+                const mutation = createToken('responsive_search_ad_create', {
+                    customer_id: normalizedCustomerId,
+                    ad_group_id: normalizedTargetAdGroupId,
+                    headlines: resolvedHeadlines,
+                    descriptions: resolvedDescriptions,
+                    final_url: resolvedFinalUrl,
+                }, preview, normalizeSafeWord(safe_word));
+                return prepareResponse(cfg, mutation, preview);
+            }
+            return validationResult(`Unsupported source ad type: ${ad.type ?? 'unknown'}. Currently supported: responsive search and responsive display ads.`);
+        }
+        catch (err) {
+            return { content: [{ type: 'text', text: formatError(err) }] };
+        }
     });
     server.tool('confirm_safe_word', 'Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1. Normal use should rely on user-message hooks.', {
         token: z.string().describe('Confirmation token from prepare_* response'),
