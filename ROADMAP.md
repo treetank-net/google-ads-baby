@@ -44,6 +44,7 @@ All creation flows should default to safe inactive states:
 - Link existing assets to Performance Max asset groups, including text, image,
   video, and call-to-action asset field types.
 - Create Performance Max asset group signals.
+- Create Performance Max listing group trees for feed-based campaigns.
 
 ## Target Coverage
 
@@ -66,7 +67,7 @@ All creation flows should default to safe inactive states:
 
 - Add text asset creation helpers for PMax copy when no reusable text assets
   exist yet.
-- Add listing group support for feed-based PMax.
+- Add richer listing group tree templates for feed-based PMax.
 
 ### Video And Demand Gen
 
@@ -76,7 +77,7 @@ All creation flows should default to safe inactive states:
 ## Implementation Order
 
 1. Add text asset creation helpers for PMax copy.
-2. Add listing group support for feed-based PMax.
+2. Add richer listing group tree templates for feed-based PMax.
 3. Explore Video and Demand Gen creation.
 
 ## Safety Requirements

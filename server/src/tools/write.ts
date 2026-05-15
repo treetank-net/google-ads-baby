@@ -6,6 +6,7 @@ import {
   createAdGroup,
   createAssetGroup,
   createAssetGroupAssets,
+  createAssetGroupListingGroupFilters,
   createAssetGroupSignals,
   createCampaignTargeting,
   createDisplayAdGroup,
@@ -31,10 +32,11 @@ const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
 const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 const MAX_KEYWORDS_PER_MUTATION = 100;
-  const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
-  const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
-  const MAX_ASSET_GROUP_SIGNALS_PER_MUTATION = 20;
-  const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
+const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
+const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
+const MAX_ASSET_GROUP_SIGNALS_PER_MUTATION = 20;
+const MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION = 20;
+const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
 const campaignRefSchema = z.object({
@@ -68,6 +70,51 @@ const assetGroupSignalSchema = z.object({
   type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
   text: z.string().min(1).max(50).optional().describe('Search theme text, required when type=SEARCH_THEME'),
   audience_id: z.string().regex(/^\d+$/).optional().describe('Audience ID, required when type=AUDIENCE'),
+});
+const listingGroupFilterTypeSchema = z.enum(['SUBDIVISION', 'UNIT_INCLUDED', 'UNIT_EXCLUDED']);
+const listingGroupSourceSchema = z.enum(['SHOPPING', 'WEBPAGE']);
+const listingGroupCaseValueSchema = z.union([
+  z.object({
+    kind: z.literal('PRODUCT_BRAND'),
+    value: z.string().min(1).max(60),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_CATEGORY'),
+    level: z.enum(['LEVEL1', 'LEVEL2', 'LEVEL3', 'LEVEL4', 'LEVEL5']),
+    category_id: z.string().regex(/^\d+$/, 'category_id must be numeric'),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_CHANNEL'),
+    channel: z.enum(['ONLINE', 'LOCAL']),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_CONDITION'),
+    condition: z.enum(['NEW', 'REFURBISHED', 'USED']),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_CUSTOM_ATTRIBUTE'),
+    index: z.enum(['INDEX0', 'INDEX1', 'INDEX2', 'INDEX3', 'INDEX4']),
+    value: z.string().min(1).max(60),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_ITEM_ID'),
+    value: z.string().min(1).max(80),
+  }),
+  z.object({
+    kind: z.literal('PRODUCT_TYPE'),
+    level: z.enum(['LEVEL1', 'LEVEL2', 'LEVEL3', 'LEVEL4', 'LEVEL5']),
+    value: z.string().min(1).max(60),
+  }),
+  z.object({
+    kind: z.literal('WEBPAGE'),
+    conditions: z.array(z.string().min(1)).min(1).max(10),
+  }),
+]);
+const listingGroupNodeSchema = z.object({
+  type: listingGroupFilterTypeSchema,
+  listing_source: listingGroupSourceSchema.default('SHOPPING'),
+  parent_index: z.number().int().nonnegative().optional(),
+  case_value: listingGroupCaseValueSchema.optional(),
 });
 
 function validationResult(message: string) {
@@ -1065,6 +1112,64 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
+    'prepare_asset_group_listing_groups',
+    'Prepare creation of Performance Max asset group listing group trees. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      asset_group_id: z.string().describe('Existing asset group ID'),
+      nodes: z.array(listingGroupNodeSchema).min(2).max(MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION).describe('Tree nodes in parent-first order. Node 0 must be the root subdivision.'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, asset_group_id, nodes, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAssetGroupId = normalizeResourceId(asset_group_id);
+      if (nodes[0]?.type !== 'SUBDIVISION') {
+        return validationResult('The first listing group node must be a SUBDIVISION root.');
+      }
+      if (nodes[0]?.parent_index !== undefined) {
+        return validationResult('The root listing group node cannot have a parent_index.');
+      }
+      if (nodes[0]?.case_value) {
+        return validationResult('The root listing group node cannot define a case_value.');
+      }
+      for (let index = 1; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        if (node.parent_index === undefined) {
+          return validationResult(`Listing group node ${index} is missing parent_index.`);
+        }
+        if (node.parent_index >= index) {
+          return validationResult(`Listing group node ${index} must point to an earlier parent_index.`);
+        }
+        if (!node.case_value) {
+          return validationResult(`Listing group node ${index} must define a case_value.`);
+        }
+      }
+      const normalizedNodes = nodes.map((node) => ({
+        type: node.type,
+        listing_source: node.listing_source,
+        parent_index: node.parent_index,
+        case_value: node.case_value,
+      }));
+      const preview = [
+        `Create listing group tree with ${normalizedNodes.length} node(s) in asset group ${normalizedAssetGroupId}, account ${normalizedCustomerId}`,
+        ...normalizedNodes.map((node, index) => {
+          const parent = node.parent_index === undefined ? 'root' : `parent ${node.parent_index}`;
+          const caseValue = node.case_value ? JSON.stringify(node.case_value) : '(none)';
+          return `- [${index}] ${node.type} / ${node.listing_source} / ${parent} / ${caseValue}`;
+        }),
+      ].join('\n');
+      const mutation = createToken('asset_group_listing_group_filters_create', {
+        customer_id: normalizedCustomerId,
+        asset_group_id: normalizedAssetGroupId,
+        nodes: normalizedNodes,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_clone_entity',
     'Prepare cloning a supported Google Ads entity as paused. Currently supports entity="ad" for responsive search/display ads.',
     {
@@ -1399,6 +1504,113 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
                 ? { type: 'SEARCH_THEME' as const, text: signal.text }
                 : { type: 'AUDIENCE' as const, audienceId: signal.audience_id }
             )),
+          );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'asset_group_listing_group_filters_create') {
+          const result = await createAssetGroupListingGroupFilters(
+            cfg,
+            p.customer_id,
+            p.asset_group_id,
+            p.nodes.map((node: any) => {
+              if (node.case_value?.kind === 'PRODUCT_BRAND') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_brand: { value: node.case_value.value },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_CATEGORY') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_category: {
+                      category_id: node.case_value.category_id,
+                      level: node.case_value.level,
+                    },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_CHANNEL') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_channel: { channel: node.case_value.channel },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_CONDITION') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_condition: { condition: node.case_value.condition },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_CUSTOM_ATTRIBUTE') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_custom_attribute: {
+                      index: node.case_value.index,
+                      value: node.case_value.value,
+                    },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_ITEM_ID') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_item_id: { value: node.case_value.value },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'PRODUCT_TYPE') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    product_type: {
+                      level: node.case_value.level,
+                      value: node.case_value.value,
+                    },
+                  },
+                };
+              }
+              if (node.case_value?.kind === 'WEBPAGE') {
+                return {
+                  type: node.type,
+                  listingSource: node.listing_source,
+                  parentIndex: node.parent_index,
+                  caseValue: {
+                    webpage: {
+                      conditions: node.case_value.conditions,
+                    },
+                  },
+                };
+              }
+              return {
+                type: node.type,
+                listingSource: node.listing_source,
+                parentIndex: node.parent_index,
+              };
+            }),
           );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }

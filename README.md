@@ -149,6 +149,7 @@ Write preparation:
 - `prepare_campaign_targeting`
 - `prepare_asset_group_assets`
 - `prepare_asset_group_signals`
+- `prepare_asset_group_listing_groups`
 - `prepare_clone_entity`
 
 Execution:

@@ -440,6 +440,35 @@ export async function createAssetGroupSignals(
   }));
 }
 
+export async function createAssetGroupListingGroupFilters(
+  cfg: AdsConfig,
+  customerId: string,
+  assetGroupId: string,
+  nodes: Array<{
+    type: 'SUBDIVISION' | 'UNIT_INCLUDED' | 'UNIT_EXCLUDED';
+    listingSource: 'SHOPPING' | 'WEBPAGE';
+    parentIndex?: number;
+    caseValue?: Record<string, unknown>;
+  }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const tempResourceNames = nodes.map((_, index) => ResourceNames.assetGroupListingGroupFilter(customerId, assetGroupId, `-${index + 1}`));
+  return customer.mutateResources(nodes.map((node, index) => ({
+    entity: 'asset_group_listing_group_filter',
+    operation: 'create',
+    resource: {
+      resource_name: tempResourceNames[index],
+      asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+      listing_source: (enums.ListingGroupFilterListingSource as any)[node.listingSource],
+      type: (enums.ListingGroupFilterType as any)[node.type],
+      ...(node.parentIndex === undefined ? {} : {
+        parent_listing_group_filter: tempResourceNames[node.parentIndex],
+      }),
+      ...(node.caseValue ? { case_value: node.caseValue } : {}),
+    },
+  })) as any);
+}
+
 export async function createResponsiveDisplayAd(
   cfg: AdsConfig,
   customerId: string,

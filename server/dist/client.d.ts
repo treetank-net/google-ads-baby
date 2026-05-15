@@ -55,6 +55,12 @@ export declare function createAssetGroupSignals(cfg: AdsConfig, customerId: stri
     type: 'AUDIENCE';
     audienceId: string;
 }>): Promise<unknown>;
+export declare function createAssetGroupListingGroupFilters(cfg: AdsConfig, customerId: string, assetGroupId: string, nodes: Array<{
+    type: 'SUBDIVISION' | 'UNIT_INCLUDED' | 'UNIT_EXCLUDED';
+    listingSource: 'SHOPPING' | 'WEBPAGE';
+    parentIndex?: number;
+    caseValue?: Record<string, unknown>;
+}>): Promise<unknown>;
 export declare function createResponsiveDisplayAd(cfg: AdsConfig, customerId: string, adGroupId: string, businessName: string, headlines: string[], longHeadline: string, descriptions: string[], finalUrl: string, marketingImageAssetIds: string[], squareMarketingImageAssetIds: string[], logoImageAssetIds: string[]): Promise<unknown>;
 export declare function uploadImageAssetFromUrl(cfg: AdsConfig, customerId: string, assetName: string, imageUrl: string, maxImageBytes: number): Promise<unknown>;
 export declare function uploadImageAssetFromFile(cfg: AdsConfig, customerId: string, assetName: string, filePath: string, maxImageBytes: number): Promise<unknown>;

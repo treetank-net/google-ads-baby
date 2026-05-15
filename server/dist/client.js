@@ -324,6 +324,24 @@ export async function createAssetGroupSignals(cfg, customerId, assetGroupId, sig
         };
     }));
 }
+export async function createAssetGroupListingGroupFilters(cfg, customerId, assetGroupId, nodes) {
+    const customer = getCustomer(cfg, customerId);
+    const tempResourceNames = nodes.map((_, index) => ResourceNames.assetGroupListingGroupFilter(customerId, assetGroupId, `-${index + 1}`));
+    return customer.mutateResources(nodes.map((node, index) => ({
+        entity: 'asset_group_listing_group_filter',
+        operation: 'create',
+        resource: {
+            resource_name: tempResourceNames[index],
+            asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+            listing_source: enums.ListingGroupFilterListingSource[node.listingSource],
+            type: enums.ListingGroupFilterType[node.type],
+            ...(node.parentIndex === undefined ? {} : {
+                parent_listing_group_filter: tempResourceNames[node.parentIndex],
+            }),
+            ...(node.caseValue ? { case_value: node.caseValue } : {}),
+        },
+    })));
+}
 export async function createResponsiveDisplayAd(cfg, customerId, adGroupId, businessName, headlines, longHeadline, descriptions, finalUrl, marketingImageAssetIds, squareMarketingImageAssetIds, logoImageAssetIds) {
     const customer = getCustomer(cfg, customerId);
     return customer.adGroupAds.create([
