@@ -333,6 +333,7 @@ export async function createAssetGroupListingGroupFilters(cfg, customerId, asset
         resource: {
             resource_name: tempResourceNames[index],
             asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+            listing_source: enums.ListingGroupFilterListingSource[node.listingSource],
             type: enums.ListingGroupFilterType[node.type],
             ...(node.parentIndex === undefined ? {} : {
                 parent_listing_group_filter: tempResourceNames[node.parentIndex],

@@ -446,6 +446,7 @@ export async function createAssetGroupListingGroupFilters(
   assetGroupId: string,
   nodes: Array<{
     type: 'SUBDIVISION' | 'UNIT_INCLUDED' | 'UNIT_EXCLUDED';
+    listingSource: 'SHOPPING' | 'WEBPAGE';
     parentIndex?: number;
     caseValue?: Record<string, unknown>;
   }>,
@@ -455,9 +456,10 @@ export async function createAssetGroupListingGroupFilters(
   return customer.mutateResources(nodes.map((node, index) => ({
     entity: 'asset_group_listing_group_filter',
     operation: 'create',
-    resource: {
+      resource: {
       resource_name: tempResourceNames[index],
       asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+      listing_source: (enums.ListingGroupFilterListingSource as any)[node.listingSource],
       type: (enums.ListingGroupFilterType as any)[node.type],
       ...(node.parentIndex === undefined ? {} : {
         parent_listing_group_filter: tempResourceNames[node.parentIndex],

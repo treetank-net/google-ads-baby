@@ -72,6 +72,7 @@ const assetGroupSignalSchema = z.object({
   audience_id: z.string().regex(/^\d+$/).optional().describe('Audience ID, required when type=AUDIENCE'),
 });
 const listingGroupFilterTypeSchema = z.enum(['SUBDIVISION', 'UNIT_INCLUDED', 'UNIT_EXCLUDED']);
+const listingGroupSourceSchema = z.enum(['SHOPPING', 'WEBPAGE']);
 const listingGroupCaseValueSchema = z.union([
   z.object({
     kind: z.literal('PRODUCT_BRAND'),
@@ -111,6 +112,7 @@ const listingGroupCaseValueSchema = z.union([
 ]);
 const listingGroupNodeSchema = z.object({
   type: listingGroupFilterTypeSchema,
+  listing_source: listingGroupSourceSchema.default('WEBPAGE'),
   parent_index: z.number().int().nonnegative().optional(),
   case_value: listingGroupCaseValueSchema.optional(),
 });
@@ -1146,6 +1148,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       }
       const normalizedNodes = nodes.map((node) => ({
         type: node.type,
+        listing_source: node.listing_source,
         parent_index: node.parent_index,
         case_value: node.case_value,
       }));
@@ -1154,7 +1157,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         ...normalizedNodes.map((node, index) => {
           const parent = node.parent_index === undefined ? 'root' : `parent ${node.parent_index}`;
           const caseValue = node.case_value ? JSON.stringify(node.case_value) : '(none)';
-          return `- [${index}] ${node.type} / ${parent} / ${caseValue}`;
+          return `- [${index}] ${node.type} / ${node.listing_source} / ${parent} / ${caseValue}`;
         }),
       ].join('\n');
       const mutation = createToken('asset_group_listing_group_filters_create', {
@@ -1514,6 +1517,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_BRAND') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_brand: { value: node.case_value.value },
@@ -1523,6 +1527,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_CATEGORY') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_category: {
@@ -1535,6 +1540,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_CHANNEL') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_channel: { channel: node.case_value.channel },
@@ -1544,6 +1550,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_CONDITION') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_condition: { condition: node.case_value.condition },
@@ -1553,6 +1560,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_CUSTOM_ATTRIBUTE') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_custom_attribute: {
@@ -1565,6 +1573,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_ITEM_ID') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_item_id: { value: node.case_value.value },
@@ -1574,6 +1583,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               if (node.case_value?.kind === 'PRODUCT_TYPE') {
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
                 caseValue: {
                   product_type: {
@@ -1596,6 +1606,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               }
               return {
                 type: node.type,
+                listingSource: node.listing_source,
                 parentIndex: node.parent_index,
               };
             }),

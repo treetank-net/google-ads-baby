@@ -57,6 +57,7 @@ export declare function createAssetGroupSignals(cfg: AdsConfig, customerId: stri
 }>): Promise<unknown>;
 export declare function createAssetGroupListingGroupFilters(cfg: AdsConfig, customerId: string, assetGroupId: string, nodes: Array<{
     type: 'SUBDIVISION' | 'UNIT_INCLUDED' | 'UNIT_EXCLUDED';
+    listingSource: 'SHOPPING' | 'WEBPAGE';
     parentIndex?: number;
     caseValue?: Record<string, unknown>;
 }>): Promise<unknown>;
