@@ -414,6 +414,32 @@ export async function createAssetGroupAssets(
   }) as any));
 }
 
+export async function createAssetGroupSignals(
+  cfg: AdsConfig,
+  customerId: string,
+  assetGroupId: string,
+  signals: Array<
+    | { type: 'SEARCH_THEME'; text: string }
+    | { type: 'AUDIENCE'; audienceId: string }
+  >,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assetGroupSignals.create(signals.map((signal) => {
+    if (signal.type === 'SEARCH_THEME') {
+      return {
+        asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+        search_theme: { text: signal.text },
+      } as any;
+    }
+    return {
+      asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+      audience: {
+        audience: ResourceNames.audience(customerId, signal.audienceId),
+      },
+    } as any;
+  }));
+}
+
 export async function createResponsiveDisplayAd(
   cfg: AdsConfig,
   customerId: string,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { readFileSync, statSync } from 'fs';
-import { createAdGroup, createAssetGroup, createAssetGroupAssets, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createPerformanceMaxCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
+import { createAdGroup, createAssetGroup, createAssetGroupAssets, createAssetGroupSignals, createCampaignTargeting, createDisplayAdGroup, createDisplayCampaign, createKeywords, createNegativeKeywords, createPerformanceMaxCampaign, createResponsiveDisplayAd, createResponsiveSearchAd, createSearchCampaign, executeGaql, mutateCampaignBudget, mutateCampaignStatus, removeCampaigns, uploadImageAssetFromFile, uploadImageAssetFromUrl, } from '../client.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
@@ -10,6 +10,7 @@ const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 const MAX_KEYWORDS_PER_MUTATION = 100;
 const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
 const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
+const MAX_ASSET_GROUP_SIGNALS_PER_MUTATION = 20;
 const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 const safeWordSchema = z.string()
     .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
@@ -40,6 +41,11 @@ const assetFieldTypeSchema = z.enum([
     'YOUTUBE_VIDEO',
     'CALL_TO_ACTION_SELECTION',
 ]);
+const assetGroupSignalSchema = z.object({
+    type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
+    text: z.string().min(1).max(50).optional().describe('Search theme text, required when type=SEARCH_THEME'),
+    audience_id: z.string().regex(/^\d+$/).optional().describe('Audience ID, required when type=AUDIENCE'),
+});
 function validationResult(message) {
     return { content: [{ type: 'text', text: `Error: ${message}` }] };
 }
@@ -885,6 +891,46 @@ export function registerWriteTools(server, cfg) {
         }, preview, normalizeSafeWord(safe_word));
         return prepareResponse(cfg, mutation, preview);
     });
+    server.tool('prepare_asset_group_signals', 'Prepare linking asset group signals to a Performance Max asset group. Returns a preview and confirmation token.', {
+        customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+        asset_group_id: z.string().describe('Existing asset group ID'),
+        signals: z.array(assetGroupSignalSchema).min(1).max(MAX_ASSET_GROUP_SIGNALS_PER_MUTATION).describe('Signals to link to the asset group. Supported types: SEARCH_THEME and AUDIENCE.'),
+        safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    }, async ({ customer_id, asset_group_id, signals, safe_word }) => {
+        const customerError = validateCustomer(customer_id);
+        if (customerError)
+            return customerError;
+        const normalizedCustomerId = normalizeCustomerId(customer_id);
+        const normalizedAssetGroupId = normalizeResourceId(asset_group_id);
+        const normalizedSignals = signals.map((signal) => ({
+            type: signal.type,
+            text: signal.text?.trim(),
+            audience_id: signal.audience_id ? normalizeResourceId(signal.audience_id) : undefined,
+        }));
+        for (const signal of normalizedSignals) {
+            if (signal.type === 'SEARCH_THEME' && !signal.text)
+                return validationResult('SEARCH_THEME signals require text.');
+            if (signal.type === 'AUDIENCE' && !signal.audience_id)
+                return validationResult('AUDIENCE signals require audience_id.');
+        }
+        const unique = new Set(normalizedSignals.map((signal) => signal.type === 'SEARCH_THEME'
+            ? `${signal.type}:${signal.text?.toLowerCase()}`
+            : `${signal.type}:${signal.audience_id}`));
+        if (unique.size !== normalizedSignals.length)
+            return validationResult('Duplicate asset group signals in request.');
+        const preview = [
+            `Link ${normalizedSignals.length} signal(s) to asset group ${normalizedAssetGroupId}, account ${normalizedCustomerId}`,
+            ...normalizedSignals.map((signal) => (signal.type === 'SEARCH_THEME'
+                ? `- SEARCH_THEME: ${signal.text}`
+                : `- AUDIENCE: ${signal.audience_id}`)),
+        ].join('\n');
+        const mutation = createToken('asset_group_signals_create', {
+            customer_id: normalizedCustomerId,
+            asset_group_id: normalizedAssetGroupId,
+            signals: normalizedSignals,
+        }, preview, normalizeSafeWord(safe_word));
+        return prepareResponse(cfg, mutation, preview);
+    });
     server.tool('prepare_clone_entity', 'Prepare cloning a supported Google Ads entity as paused. Currently supports entity="ad" for responsive search/display ads.', {
         customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
         entity: cloneEntitySchema.describe('Entity kind to clone. Currently only ad is implemented.'),
@@ -1115,6 +1161,12 @@ export function registerWriteTools(server, cfg) {
                     assetId: asset.asset_id,
                     fieldType: asset.field_type,
                 })));
+                return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+            }
+            if (mutation.action === 'asset_group_signals_create') {
+                const result = await createAssetGroupSignals(cfg, p.customer_id, p.asset_group_id, p.signals.map((signal) => (signal.type === 'SEARCH_THEME'
+                    ? { type: 'SEARCH_THEME', text: signal.text }
+                    : { type: 'AUDIENCE', audienceId: signal.audience_id })));
                 return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
             }
             if (mutation.action === 'image_asset_upload_from_url') {

@@ -148,6 +148,7 @@ Write preparation:
 - `prepare_negative_keywords`
 - `prepare_campaign_targeting`
 - `prepare_asset_group_assets`
+- `prepare_asset_group_signals`
 - `prepare_clone_entity`
 
 Execution:

@@ -48,6 +48,13 @@ export declare function createAssetGroupAssets(cfg: AdsConfig, customerId: strin
     assetId: string;
     fieldType: string;
 }>): Promise<unknown>;
+export declare function createAssetGroupSignals(cfg: AdsConfig, customerId: string, assetGroupId: string, signals: Array<{
+    type: 'SEARCH_THEME';
+    text: string;
+} | {
+    type: 'AUDIENCE';
+    audienceId: string;
+}>): Promise<unknown>;
 export declare function createResponsiveDisplayAd(cfg: AdsConfig, customerId: string, adGroupId: string, businessName: string, headlines: string[], longHeadline: string, descriptions: string[], finalUrl: string, marketingImageAssetIds: string[], squareMarketingImageAssetIds: string[], logoImageAssetIds: string[]): Promise<unknown>;
 export declare function uploadImageAssetFromUrl(cfg: AdsConfig, customerId: string, assetName: string, imageUrl: string, maxImageBytes: number): Promise<unknown>;
 export declare function uploadImageAssetFromFile(cfg: AdsConfig, customerId: string, assetName: string, filePath: string, maxImageBytes: number): Promise<unknown>;

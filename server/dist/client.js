@@ -307,6 +307,23 @@ export async function createAssetGroupAssets(cfg, customerId, assetGroupId, asse
         field_type: enums.AssetFieldType[asset.fieldType],
     })));
 }
+export async function createAssetGroupSignals(cfg, customerId, assetGroupId, signals) {
+    const customer = getCustomer(cfg, customerId);
+    return customer.assetGroupSignals.create(signals.map((signal) => {
+        if (signal.type === 'SEARCH_THEME') {
+            return {
+                asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+                search_theme: { text: signal.text },
+            };
+        }
+        return {
+            asset_group: ResourceNames.assetGroup(customerId, assetGroupId),
+            audience: {
+                audience: ResourceNames.audience(customerId, signal.audienceId),
+            },
+        };
+    }));
+}
 export async function createResponsiveDisplayAd(cfg, customerId, adGroupId, businessName, headlines, longHeadline, descriptions, finalUrl, marketingImageAssetIds, squareMarketingImageAssetIds, logoImageAssetIds) {
     const customer = getCustomer(cfg, customerId);
     return customer.adGroupAds.create([
