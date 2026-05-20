@@ -32,13 +32,23 @@ npm run build
 
 ## Install In Claude Code
 
-This repository contains a Claude plugin manifest:
+This repository can be installed as a Claude Code plugin through its marketplace
+manifest:
 
 ```text
 .claude-plugin/plugin.json
+.claude-plugin/marketplace.json
 ```
 
-Install/use the repository as a local Claude Code plugin, then reload plugins in Claude Code. The plugin registers:
+Add the GitLab repository as a Claude Code plugin marketplace, then install the
+plugin:
+
+```bash
+/plugin marketplace add https://gitlab.com/treetank/google-ads-baby.git
+/plugin install google-ads-baby@google-ads-baby-marketplace
+```
+
+After installation, reload or restart Claude Code. The plugin registers:
 
 - MCP server: `google-ads`
 - safety hooks from `hooks/hooks.json`
@@ -48,6 +58,9 @@ After installing, ask Claude to run:
 ```text
 setup_google_auth
 ```
+
+To update later, update the marketplace from Claude Code or reinstall the plugin
+from the same marketplace.
 
 ## Install In Codex
 
