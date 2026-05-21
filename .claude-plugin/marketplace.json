@@ -1,5 +1,8 @@
 {
   "name": "google-ads-baby-marketplace",
+  "metadata": {
+    "description": "Google Ads campaign management plugins by Treetank."
+  },
   "owner": {
     "name": "treetank"
   },
