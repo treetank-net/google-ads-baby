@@ -25,8 +25,21 @@ interface SavedConfig {
   savedAt?: string;
 }
 
-function getConfigDir(): string {
-  return process.env['CLAUDE_PLUGIN_DATA'] || join(process.env['HOME'] || '/tmp', '.google-ads-baby');
+function isValidEnv(val: string | undefined): val is string {
+  return !!val && !val.includes('${');
+}
+
+function env(name: string): string {
+  const v = process.env[name];
+  return isValidEnv(v) ? v : '';
+}
+
+export function getConfigDir(): string {
+  const pluginData = process.env['CLAUDE_PLUGIN_DATA'];
+  if (isValidEnv(pluginData)) return pluginData;
+  const home = process.env['HOME'] || process.env['USERPROFILE'] || process.env['APPDATA'];
+  if (home) return join(home, '.google-ads-baby');
+  return join(process.platform === 'win32' ? (process.env['TEMP'] || 'C:\\Temp') : '/tmp', '.google-ads-baby');
 }
 
 export function getConfigPath(): string {
@@ -54,20 +67,20 @@ export async function saveConfig(config: Partial<SavedConfig>): Promise<string> 
 
 export async function configFromEnv(): Promise<AdsConfig> {
   const saved = await loadSavedConfig();
-  const safetyLevel = process.env['GOOGLE_ADS_SAFETY_LEVEL'] || saved.safetyLevel || 'standard';
-  const mutationTokenTtlSeconds = process.env['GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS'] || saved.mutationTokenTtlSeconds || '';
-  const confirmStateTtlSeconds = process.env['GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS'] || saved.confirmStateTtlSeconds || '';
+  const safetyLevel = env('GOOGLE_ADS_SAFETY_LEVEL') || saved.safetyLevel || 'standard';
+  const mutationTokenTtlSeconds = env('GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS') || saved.mutationTokenTtlSeconds || '';
+  const confirmStateTtlSeconds = env('GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS') || saved.confirmStateTtlSeconds || '';
 
   process.env['GOOGLE_ADS_SAFETY_LEVEL'] ||= safetyLevel;
   if (mutationTokenTtlSeconds) process.env['GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS'] ||= mutationTokenTtlSeconds;
   if (confirmStateTtlSeconds) process.env['GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS'] ||= confirmStateTtlSeconds;
 
   return {
-    clientId: process.env['GOOGLE_ADS_CLIENT_ID'] || saved.clientId || OAUTH_CLIENT_ID,
-    clientSecret: process.env['GOOGLE_ADS_CLIENT_SECRET'] || saved.clientSecret || OAUTH_CLIENT_SECRET,
-    developerToken: process.env['GOOGLE_ADS_DEVELOPER_TOKEN'] || saved.developerToken || '',
-    refreshToken: process.env['GOOGLE_ADS_REFRESH_TOKEN'] || saved.refreshToken || '',
-    loginCustomerId: process.env['GOOGLE_ADS_MCC_ID'] || saved.loginCustomerId || '',
+    clientId: env('GOOGLE_ADS_CLIENT_ID') || saved.clientId || OAUTH_CLIENT_ID,
+    clientSecret: env('GOOGLE_ADS_CLIENT_SECRET') || saved.clientSecret || OAUTH_CLIENT_SECRET,
+    developerToken: env('GOOGLE_ADS_DEVELOPER_TOKEN') || saved.developerToken || '',
+    refreshToken: env('GOOGLE_ADS_REFRESH_TOKEN') || saved.refreshToken || '',
+    loginCustomerId: env('GOOGLE_ADS_MCC_ID') || saved.loginCustomerId || '',
     safetyLevel: safetyLevel as AdsConfig['safetyLevel'],
     mutationTokenTtlSeconds,
     confirmStateTtlSeconds,

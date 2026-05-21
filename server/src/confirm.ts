@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getConfigDir } from './config.js';
 
 export interface PendingMutation {
   token: string;
@@ -52,9 +53,6 @@ function tokenTtlMs(): number {
 }
 const pending = new Map<string, PendingMutation>();
 
-function getConfigDir(): string {
-  return process.env['CLAUDE_PLUGIN_DATA'] || join(process.env['HOME'] || '/tmp', '.google-ads-baby');
-}
 
 function getSafeWordPath(): string {
   return join(getConfigDir(), '.gads-safe-word');

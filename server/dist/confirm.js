@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getConfigDir } from './config.js';
 export const DEFAULT_TOKEN_TTL_SECONDS = 60 * 60;
 export const DEFAULT_CONFIRM_STATE_TTL_SECONDS = 60 * 60;
 function tokenTtlSeconds() {
@@ -37,9 +38,6 @@ function tokenTtlMs() {
     return tokenTtlSeconds() * 1000;
 }
 const pending = new Map();
-function getConfigDir() {
-    return process.env['CLAUDE_PLUGIN_DATA'] || join(process.env['HOME'] || '/tmp', '.google-ads-baby');
-}
 function getSafeWordPath() {
     return join(getConfigDir(), '.gads-safe-word');
 }

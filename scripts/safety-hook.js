@@ -9,8 +9,13 @@ if (!mode) {
   process.exit(2);
 }
 
-const stateDir = process.env.GOOGLE_ADS_BABY_DATA
-  || process.env.CLAUDE_PLUGIN_DATA
+function validEnv(name) {
+  const v = process.env[name];
+  return v && !v.includes('${') ? v : '';
+}
+
+const stateDir = validEnv('GOOGLE_ADS_BABY_DATA')
+  || validEnv('CLAUDE_PLUGIN_DATA')
   || join(homedir() || tmpdir(), '.google-ads-baby');
 mkdirSync(stateDir, { recursive: true });
 

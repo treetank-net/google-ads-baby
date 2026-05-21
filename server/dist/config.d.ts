@@ -19,6 +19,7 @@ interface SavedConfig {
     confirmStateTtlSeconds?: string;
     savedAt?: string;
 }
+export declare function getConfigDir(): string;
 export declare function getConfigPath(): string;
 export declare function loadSavedConfig(): Promise<SavedConfig>;
 export declare function saveConfig(config: Partial<SavedConfig>): Promise<string>;
