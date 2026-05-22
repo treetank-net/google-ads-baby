@@ -11,8 +11,8 @@
   "hooks": "./hooks.json",
   "mcpServers": {
     "google-ads": {
-      "command": "npx",
-      "args": ["-y", "--package", "github:treetank-net/google-ads-baby#master", "google-ads-baby-mcp"],
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.js"],
       "env": {
         "CLAUDE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA:-}",
         "GOOGLE_ADS_DEVELOPER_TOKEN": "${GOOGLE_ADS_DEVELOPER_TOKEN:-}",
