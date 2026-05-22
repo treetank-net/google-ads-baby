@@ -1,6 +1,6 @@
 {
   "name": "@treetank/google-ads-baby",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Google Ads MCP server with two-phase safety confirmations.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   },
   "files": [
     "scripts/",
-    "server/dist/",
+    "server/bundle.cjs",
     "hooks.json",
     "hooks/",
     ".claude-plugin/",
@@ -21,10 +21,5 @@
   },
   "keywords": ["google-ads", "mcp", "claude", "campaigns", "safety"],
   "author": "Jacek Marianski <jmarianski@trans.eu>",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.13.0",
-    "google-ads-api": "^23.0.0",
-    "zod": "^3.25.0"
-  },
   "license": "MIT"
 }

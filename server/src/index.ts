@@ -5,16 +5,20 @@ import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerAuthTools } from './tools/auth.js';
 
-const server = new McpServer({
-  name: 'google-ads-baby',
-  version: '0.1.0',
-});
+async function main() {
+  const server = new McpServer({
+    name: 'google-ads-baby',
+    version: '0.1.0',
+  });
 
-const cfg = await configFromEnv();
+  const cfg = await configFromEnv();
 
-registerAuthTools(server, cfg);
-registerReadTools(server, cfg);
-registerWriteTools(server, cfg);
+  registerAuthTools(server, cfg);
+  registerReadTools(server, cfg);
+  registerWriteTools(server, cfg);
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main();

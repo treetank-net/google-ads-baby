@@ -2,34 +2,18 @@
 import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const serverDir = join(root, 'server');
-const entry = join(serverDir, 'dist', 'index.js');
-const nodeModules = join(serverDir, 'node_modules');
+const bundle = join(root, 'server', 'bundle.cjs');
 
-if (!existsSync(entry)) {
-  process.stderr.write(`Missing built MCP server at ${entry}.\n`);
+if (!existsSync(bundle)) {
+  process.stderr.write(`Missing MCP server bundle at ${bundle}.\n`);
   process.exit(1);
 }
 
-if (!existsSync(nodeModules)) {
-  process.stderr.write('Installing server dependencies...\n');
-  try {
-    execSync('npm install --omit=dev', {
-      cwd: serverDir,
-      stdio: ['ignore', 'ignore', 'inherit'],
-      shell: process.platform === 'win32',
-    });
-  } catch {
-    process.stderr.write('Failed to install dependencies.\n');
-    process.exit(1);
-  }
-}
-
-const child = spawn('node', [entry], {
-  cwd: serverDir,
+const child = spawn('node', [bundle], {
+  cwd: join(root, 'server'),
   stdio: 'inherit',
   shell: process.platform === 'win32',
 });

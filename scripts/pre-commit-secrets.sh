@@ -17,7 +17,7 @@ PATTERNS=(
 )
 
 # Allowlisted files (public OAuth credentials / the hook script itself)
-ALLOW_FILES='(server/src/constants\.ts|scripts/pre-commit-secrets\.sh)'
+ALLOW_FILES='(server/src/constants\.ts|scripts/pre-commit-secrets\.sh|server/bundle\.cjs)'
 
 COMBINED=$(IFS='|'; echo "${PATTERNS[*]}")
 
