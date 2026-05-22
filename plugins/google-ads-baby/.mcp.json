@@ -2,7 +2,7 @@
   "mcpServers": {
     "google-ads": {
       "command": "npx",
-      "args": ["-y", "--package", "github:treetank-net/google-ads-baby#master", "google-ads-baby-mcp"],
+      "args": ["-y", "--package", "@treetank/google-ads-baby", "google-ads-baby-mcp"],
       "env": {
         "GOOGLE_ADS_ENABLE_MANUAL_CONFIRM": "0"
       }

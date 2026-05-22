@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y --package github:treetank-net/google-ads-baby#master google-ads-baby-safety-hook pre-tool"
+            "command": "npx -y --package @treetank/google-ads-baby google-ads-baby-safety-hook pre-tool"
           }
         ]
       }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y --package github:treetank-net/google-ads-baby#master google-ads-baby-safety-hook user-submit"
+            "command": "npx -y --package @treetank/google-ads-baby google-ads-baby-safety-hook user-submit"
           }
         ]
       }
