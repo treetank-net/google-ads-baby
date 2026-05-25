@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y --package @treetank/google-ads-baby google-ads-baby-safety-hook pre-tool"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" pre-tool"
           }
         ]
       }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx -y --package @treetank/google-ads-baby google-ads-baby-safety-hook user-submit"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit"
           }
         ]
       }
