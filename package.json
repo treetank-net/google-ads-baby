@@ -1,6 +1,6 @@
 {
   "name": "google-ads-baby",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "type": "module",
   "description": "Google Ads MCP server with two-phase safety confirmations.",
   "author": "Jacek Marianski <jmarianski@trans.eu>",
