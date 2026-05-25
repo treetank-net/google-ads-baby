@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'os';
 
 const mode = process.argv[2];
 if (!mode) {
-  console.error('Usage: google-ads-baby-safety-hook <pre-tool|user-submit>');
+  console.error('Usage: google-ads-baby-safety-hook <pre-tool|user-submit> [dataDir]');
   process.exit(2);
 }
 
@@ -14,7 +14,12 @@ function validEnv(name) {
   return v && !v.includes('${') ? v : '';
 }
 
-const stateDir = validEnv('GOOGLE_ADS_BABY_DATA')
+function validArg(v) {
+  return v && !v.includes('${') ? v : '';
+}
+
+const stateDir = validArg(process.argv[3])
+  || validEnv('GOOGLE_ADS_BABY_DATA')
   || validEnv('CLAUDE_PLUGIN_DATA')
   || join(homedir() || tmpdir(), '.google-ads-baby');
 mkdirSync(stateDir, { recursive: true });

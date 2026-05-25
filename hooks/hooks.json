@@ -3,13 +3,13 @@
     "PreToolUse": [
       {
         "matcher": "google-ads__(?:prepare_|confirm_)",
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" pre-tool" }]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" pre-tool \"${CLAUDE_PLUGIN_DATA}\"" }]
       }
     ],
     "UserPromptSubmit": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit" }]
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit \"${CLAUDE_PLUGIN_DATA}\"" }]
       }
     ]
   }
