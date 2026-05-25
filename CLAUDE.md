@@ -10,9 +10,70 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 - TypeScript source in `server/src/`, compiled with `tsc`, bundled with `esbuild` into single `server/bundle.cjs`
 - `google-ads-api` v23 (community, gRPC), `@modelcontextprotocol/sdk` (stdio), `zod`
 - All dependencies bundled — no `node_modules` needed at runtime, cold start ~0.8s
-- Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
-- Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation` or `confirm_all_mutations`
 - Token store: in-memory, one-shot, 1h TTL
+
+#### Source layout (`server/src/`)
+```
+index.ts                  — entrypoint: tworzy McpServer, rejestruje toole, startuje stdio
+config.ts                 — AdsConfig, configFromEnv(), getConfigDir()
+confirm.ts                — token store (in-memory Map), safe word / confirm state (pliki)
+history.ts                — audit log JSONL (~/.google-ads-baby/mutation-history.jsonl)
+errors.ts                 — formatError()
+validation.ts             — normalizeCustomerId(), normalizeResourceId(), requireCustomerId()
+constants.ts              — współdzielone stałe
+client.ts                 — barrel re-export z client/
+
+client/
+  core.ts                 — getCustomer(), listAccounts(), getCampaigns(), executeGaql()
+  campaigns.ts            — campaign CRUD, ad group create, targeting, bidding
+  ads.ts                  — responsive search/display ad, keywords, negative keywords
+  assets.ts               — asset groups, extensions, sitelinks, callouts, image upload, linking
+  index.ts                — barrel re-export
+
+tools/
+  auth.ts                 — OAuth flow (auth_google_ads, setup_google_auth)
+  read.ts                 — orchestrator: registerReadTools()
+  read-helpers.ts         — schemas, query builders, pure functions
+  read-accounts.ts        — list_accounts, get_campaigns, execute_gaql, list_ads_entities, get_ad_blueprint
+  read-history.ts         — get_mutation_history, get_mutation_stats
+  write.ts                — orchestrator: registerWriteTools()
+  write-schemas.ts        — Zod schemas, safety constants (budget caps, limits)
+  write-helpers.ts        — validation, image inspection, preview formatting
+  write-executor.ts       — executeMutation() dispatcher, formatMutationError()
+  write-prepare-campaigns.ts — prepare_campaign_status, prepare_budget_change, prepare_search/display/pmax_campaign, etc.
+  write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
+  write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords
+  write-confirm.ts        — get_safety_setup, confirm_safe_word, confirm_mutation, confirm_all_mutations
+```
+
+#### Jak dodawać nowe rzeczy
+
+**Nowy write tool (prepare_*):**
+1. Schemat Zod → `write-schemas.ts`
+2. Handler `server.tool('prepare_...')` → do odpowiedniego `write-prepare-*.ts` wg domeny:
+   - kampanie/budżety/grupy reklam/targeting/bidding → `write-prepare-campaigns.ts`
+   - assety/obrazki/rozszerzenia/linkowanie → `write-prepare-assets.ts`
+   - reklamy/klonowanie/keywordy → `write-prepare-ads.ts`
+3. Dispatch w `executeMutation()` → `write-executor.ts` (dodaj `if (mutation.action === '...')`)
+4. Jeśli potrzeba nowej funkcji API → `client/` (campaigns.ts / ads.ts / assets.ts wg domeny), auto-eksportuje się przez barrel
+5. Helpery (walidacja, formatowanie preview) → `write-helpers.ts`
+6. **`npm run build`** po każdej zmianie w `src/` — bundle.cjs musi być aktualny
+
+**Nowy read tool:**
+1. Handler → `read-accounts.ts` (dane z Google Ads) lub `read-history.ts` (lokalne dane)
+2. Query buildery / helpery → `read-helpers.ts`
+3. Jeśli nowy typ encji w `list_ads_entities` → rozszerz `entitySchema` i `buildListQuery()` w `read-helpers.ts`
+
+**Nowa funkcja client (Google Ads API):**
+1. Dobierz plik wg domeny: `client/campaigns.ts`, `client/ads.ts`, `client/assets.ts`
+2. Eksportuj funkcję — barrel `client/index.ts` + `client.ts` propaguje automatycznie
+3. Sygnatura: `(cfg: AdsConfig, customerId: string, ...params) => Promise<unknown>`
+
+**Konwencje:**
+- Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
+- Budget/CPC walidacja przez stałe z `write-schemas.ts` (MAX_BUDGET_MICROS, MAX_CPC_MICROS)
+- Customer ID normalizacja: `normalizeCustomerId()` + `validateCustomer()` na początku każdego handlera
+- Nie dodawaj komentarzy w kodzie — nazwy funkcji/zmiennych muszą być samodokumentujące
 
 ### Safety Hooks (`hooks/` + `scripts/`)
 - `PreToolUse` on `prepare_*` → sets state to "pending"
@@ -80,7 +141,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 
 ## Safety Guardrails
-- Budget cap: 500 PLN/day max (configurable in `tools/write.ts`)
+- Budget cap: 500 PLN/day max (configurable in `tools/write-schemas.ts`)
 - GAQL mutations blocked in `execute_gaql` tool
 - Token: one-shot, 1h expiry by default, server-side only
 - Safety level:
