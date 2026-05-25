@@ -83,6 +83,7 @@ const campaignAssetFieldTypeSchema = z.enum([
   'STRUCTURED_SNIPPET',
   'AD_IMAGE',
   'LOGO',
+  'BUSINESS_LOGO',
   'PROMOTION',
   'PRICE',
   'BUSINESS_NAME',
