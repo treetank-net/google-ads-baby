@@ -511,6 +511,42 @@ export async function createResponsiveDisplayAd(
   ]);
 }
 
+export async function linkCampaignAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  assets: Array<{ assetId: string; fieldType: string }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources(assets.map((asset) => ({
+    entity: 'campaign_asset',
+    operation: 'create',
+    resource: {
+      campaign: ResourceNames.campaign(customerId, campaignId),
+      asset: ResourceNames.asset(customerId, asset.assetId),
+      field_type: (enums.AssetFieldType as any)[asset.fieldType],
+    },
+  })) as any);
+}
+
+export async function linkAdGroupAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  adGroupId: string,
+  assets: Array<{ assetId: string; fieldType: string }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources(assets.map((asset) => ({
+    entity: 'ad_group_asset',
+    operation: 'create',
+    resource: {
+      ad_group: ResourceNames.adGroup(customerId, adGroupId),
+      asset: ResourceNames.asset(customerId, asset.assetId),
+      field_type: (enums.AssetFieldType as any)[asset.fieldType],
+    },
+  })) as any);
+}
+
 export async function uploadImageAssetFromUrl(
   cfg: AdsConfig,
   customerId: string,

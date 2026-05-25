@@ -18,6 +18,8 @@ import {
   createResponsiveSearchAd,
   createSearchCampaign,
   executeGaql,
+  linkAdGroupAssets,
+  linkCampaignAssets,
   mutateCampaignBudget,
   mutateCampaignStatus,
   removeCampaigns,
@@ -34,6 +36,7 @@ const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 const MAX_KEYWORDS_PER_MUTATION = 100;
 const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
 const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
+const MAX_CAMPAIGN_ASSETS_PER_MUTATION = 20;
 const MAX_ASSET_GROUP_SIGNALS_PER_MUTATION = 20;
 const MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION = 20;
 const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
@@ -66,6 +69,38 @@ const assetFieldTypeSchema = z.enum([
   'YOUTUBE_VIDEO',
   'CALL_TO_ACTION_SELECTION',
 ]);
+const campaignAssetFieldTypeSchema = z.enum([
+  'HEADLINE',
+  'DESCRIPTION',
+  'SITELINK',
+  'CALL',
+  'CALLOUT',
+  'STRUCTURED_SNIPPET',
+  'IMAGE',
+  'LOGO',
+  'PROMOTION',
+  'PRICE',
+  'BUSINESS_NAME',
+]);
+const campaignAssetSchema = z.object({
+  asset_id: z.string().describe('Existing asset ID (from prepare_image_asset_* or execute_gaql)'),
+  field_type: campaignAssetFieldTypeSchema.describe('Asset field type for campaign-level linking, e.g. IMAGE for image extensions'),
+});
+const adGroupAssetFieldTypeSchema = z.enum([
+  'HEADLINE',
+  'DESCRIPTION',
+  'SITELINK',
+  'CALL',
+  'CALLOUT',
+  'STRUCTURED_SNIPPET',
+  'IMAGE',
+  'PROMOTION',
+  'PRICE',
+]);
+const adGroupAssetSchema = z.object({
+  asset_id: z.string().describe('Existing asset ID'),
+  field_type: adGroupAssetFieldTypeSchema.describe('Asset field type for ad group-level linking'),
+});
 const assetGroupSignalSchema = z.object({
   type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
   text: z.string().min(1).max(50).optional().describe('Search theme text, required when type=SEARCH_THEME'),
@@ -1021,6 +1056,88 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
+    'prepare_campaign_assets',
+    'Prepare linking existing assets (images, sitelinks, callouts, etc.) to a campaign. Use this to add image extensions to Search campaigns. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Existing campaign ID'),
+      assets: z.array(campaignAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the campaign'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, campaign_id, assets, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const normalizedAssets = assets.map((asset) => ({
+        asset_id: normalizeResourceId(asset.asset_id),
+        field_type: asset.field_type,
+      }));
+      const unique = new Set(normalizedAssets.map((a) => `${a.asset_id}:${a.field_type}`));
+      if (unique.size !== normalizedAssets.length) return validationResult('Duplicate asset links in request.');
+
+      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'IMAGE');
+      if (imageAssets.length) {
+        const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((a) => a.asset_id));
+        const placementError = validateAssetPlacement('Image extension', imageAssets.map((a) => a.asset_id), imageInfo, 0.8, 2.1);
+        if (placementError) return validationResult(placementError);
+      }
+
+      const preview = [
+        `Link ${normalizedAssets.length} asset(s) to campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
+        ...normalizedAssets.map((a) => `- ${a.field_type}: asset ${a.asset_id}`),
+      ].join('\n');
+      const mutation = createToken('campaign_assets_link', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        assets: normalizedAssets,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_ad_group_assets',
+    'Prepare linking existing assets (images, sitelinks, callouts, etc.) to an ad group. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_group_id: z.string().describe('Existing ad group ID'),
+      assets: z.array(adGroupAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the ad group'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, ad_group_id, assets, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+      const normalizedAssets = assets.map((asset) => ({
+        asset_id: normalizeResourceId(asset.asset_id),
+        field_type: asset.field_type,
+      }));
+      const unique = new Set(normalizedAssets.map((a) => `${a.asset_id}:${a.field_type}`));
+      if (unique.size !== normalizedAssets.length) return validationResult('Duplicate asset links in request.');
+
+      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'IMAGE');
+      if (imageAssets.length) {
+        const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((a) => a.asset_id));
+        const placementError = validateAssetPlacement('Image extension', imageAssets.map((a) => a.asset_id), imageInfo, 0.8, 2.1);
+        if (placementError) return validationResult(placementError);
+      }
+
+      const preview = [
+        `Link ${normalizedAssets.length} asset(s) to ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
+        ...normalizedAssets.map((a) => `- ${a.field_type}: asset ${a.asset_id}`),
+      ].join('\n');
+      const mutation = createToken('ad_group_assets_link', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: normalizedAdGroupId,
+        assets: normalizedAssets,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_asset_group_assets',
     'Prepare linking existing assets to a Performance Max asset group. Returns a preview and confirmation token.',
     {
@@ -1477,6 +1594,32 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
               locationCriterionIds: p.location_criterion_ids,
               languageCriterionIds: p.language_criterion_ids,
             },
+          );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'campaign_assets_link') {
+          const result = await linkCampaignAssets(
+            cfg,
+            p.customer_id,
+            p.campaign_id,
+            p.assets.map((asset: any) => ({
+              assetId: asset.asset_id,
+              fieldType: asset.field_type,
+            })),
+          );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'ad_group_assets_link') {
+          const result = await linkAdGroupAssets(
+            cfg,
+            p.customer_id,
+            p.ad_group_id,
+            p.assets.map((asset: any) => ({
+              assetId: asset.asset_id,
+              fieldType: asset.field_type,
+            })),
           );
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
