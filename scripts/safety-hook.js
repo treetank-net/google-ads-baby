@@ -113,7 +113,7 @@ function run() {
       process.exit(0);
     }
 
-    if (/google[-_]ads__confirm_mutation/.test(toolName)) {
+    if (/google[-_]ads__confirm_(all_)?mutation/.test(toolName)) {
       if (safetyLevel === 'off' || process.env.GOOGLE_ADS_YOLO === '1') {
         try { unlinkSync(STATE_FILE); } catch {}
         process.exit(0);

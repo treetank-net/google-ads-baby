@@ -11,7 +11,7 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 - `google-ads-api` v23 (community, gRPC), `@modelcontextprotocol/sdk` (stdio), `zod`
 - All dependencies bundled — no `node_modules` needed at runtime, cold start ~0.8s
 - Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
-- Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation`
+- Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation` or `confirm_all_mutations`
 - Token store: in-memory, one-shot, 1h TTL
 
 ### Safety Hooks (`hooks/` + `scripts/`)
@@ -32,6 +32,12 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 2. LLM shows preview + safe word to user, asks for confirmation using that word
 3. User types response containing the safe word → hook marks as confirmed
 4. LLM calls `confirm_mutation(token)` → hook allows → server executes
+
+#### Batch Mode
+Multiple `prepare_*` calls can share the same `safe_word`. After one user confirmation:
+- `confirm_all_mutations(tokens: [...])` executes all pending mutations sequentially
+- Confirm state is consumed once for the entire batch
+- Results are returned per-operation with success/failure status
 
 ### OAuth Flow & Custom App Credentials
 1. LLM calls `auth_google_ads` → starts local HTTP server on port 9876
@@ -83,6 +89,9 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
   - `off`: disables the Claude hook gate; server-side prepare token is still required
 - Hook: requires real user message between prepare and confirm
 - MCP tool `get_safety_setup` tells the LLM/user how to install Codex safety hooks when Codex shows `No plugin hooks`
+- Mutation history: every executed mutation (success/failure) is logged to `~/.google-ads-baby/mutation-history.jsonl`
+  - `get_mutation_history` — browse past operations, filter by customer/action/date, includes full params + asset IDs
+  - `get_mutation_stats` — summary: counts, success rate, action breakdown, recently used asset IDs
 
 ## Background — dlaczego tak, a nie inaczej
 
@@ -157,7 +166,7 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 
 ### Średnioterminowe
 - [ ] OS dialog fallback (`zenity`/`osascript`) dla klientów bez hooków — konfigurowalny w env var
-- [ ] Audit log — każda mutacja logowana do pliku z timestampem, tokenem, wynikiem
+- [x] Audit log — `mutation-history.jsonl` + `get_mutation_history` / `get_mutation_stats` toole
 - [ ] Rate limiting — max N mutacji na minutę (server-side)
 - [ ] Konfigurowalny budget cap per-account (nie globalny 500 PLN)
 - [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania

@@ -32,7 +32,9 @@ import {
   uploadImageAssetFromFile,
   uploadImageAssetFromUrl,
 } from '../client.js';
+import type { PendingMutation } from '../confirm.js';
 import { confirmPendingSafeWord, createToken, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import { recordSuccess, recordFailure, readHistory, getHistoryStats } from '../history.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 
@@ -435,6 +437,144 @@ function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeWord: st
       }, null, 2),
     }],
   };
+}
+
+async function executeMutation(cfg: AdsConfig, mutation: PendingMutation, batchId?: string): Promise<string> {
+  const p = mutation.params as Record<string, any>;
+
+  const ok = (result?: unknown): string => {
+    recordSuccess(mutation.action, p, mutation.preview, result, batchId);
+    if (result) return `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}`;
+    return `OK: ${mutation.preview} — done.`;
+  };
+
+  if (mutation.action === 'campaign_status') {
+    await mutateCampaignStatus(cfg, p.customer_id, p.campaign_id, p.new_status);
+    return ok();
+  }
+
+  if (mutation.action === 'campaign_removal') {
+    return ok(await removeCampaigns(cfg, p.customer_id, p.campaigns.map((c: any) => c.campaign_id)));
+  }
+
+  if (mutation.action === 'budget_change') {
+    await mutateCampaignBudget(cfg, p.customer_id, p.budget_id, p.amount_micros);
+    return ok();
+  }
+
+  if (mutation.action === 'search_campaign_create') return ok(await createSearchCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros));
+  if (mutation.action === 'display_campaign_create') return ok(await createDisplayCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros));
+
+  if (mutation.action === 'performance_max_campaign_create') {
+    return ok(await createPerformanceMaxCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros, {
+      businessNameAssetId: p.business_name_asset_id, logoAssetId: p.logo_asset_id,
+    }));
+  }
+
+  if (mutation.action === 'ad_group_create') return ok(await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros));
+  if (mutation.action === 'display_ad_group_create') return ok(await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros));
+
+  if (mutation.action === 'asset_group_create') {
+    return ok(await createAssetGroup(cfg, p.customer_id, p.campaign_id, p.asset_group_name, p.final_urls,
+      p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'responsive_search_ad_create') return ok(await createResponsiveSearchAd(cfg, p.customer_id, p.ad_group_id, p.headlines, p.descriptions, p.final_url));
+
+  if (mutation.action === 'responsive_display_ad_create') {
+    return ok(await createResponsiveDisplayAd(cfg, p.customer_id, p.ad_group_id, p.business_name, p.headlines,
+      p.long_headline, p.descriptions, p.final_url, p.marketing_image_asset_ids, p.square_marketing_image_asset_ids, p.logo_image_asset_ids));
+  }
+
+  if (mutation.action === 'keywords_create') {
+    return ok(await createKeywords(cfg, p.customer_id, p.ad_group_id,
+      p.keywords.map((kw: any) => ({ text: kw.text, matchType: kw.match_type }))));
+  }
+
+  if (mutation.action === 'negative_keywords_create') {
+    const target = p.level === 'campaign'
+      ? { level: 'campaign' as const, campaignId: p.campaign_id }
+      : { level: 'ad_group' as const, adGroupId: p.ad_group_id };
+    return ok(await createNegativeKeywords(cfg, p.customer_id, target,
+      p.keywords.map((kw: any) => ({ text: kw.text, matchType: kw.match_type }))));
+  }
+
+  if (mutation.action === 'campaign_targeting_create') {
+    return ok(await createCampaignTargeting(cfg, p.customer_id, p.campaign_id,
+      { locationCriterionIds: p.location_criterion_ids, languageCriterionIds: p.language_criterion_ids }));
+  }
+
+  if (mutation.action === 'campaign_assets_link') {
+    return ok(await linkCampaignAssets(cfg, p.customer_id, p.campaign_id,
+      p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'ad_group_assets_link') {
+    return ok(await linkAdGroupAssets(cfg, p.customer_id, p.ad_group_id,
+      p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'asset_group_assets_create') {
+    return ok(await createAssetGroupAssets(cfg, p.customer_id, p.asset_group_id,
+      p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'asset_group_signals_create') {
+    return ok(await createAssetGroupSignals(cfg, p.customer_id, p.asset_group_id,
+      p.signals.map((s: any) => s.type === 'SEARCH_THEME'
+        ? { type: 'SEARCH_THEME' as const, text: s.text }
+        : { type: 'AUDIENCE' as const, audienceId: s.audience_id })));
+  }
+
+  if (mutation.action === 'asset_group_listing_group_filters_create') {
+    return ok(await createAssetGroupListingGroupFilters(cfg, p.customer_id, p.asset_group_id,
+      p.nodes.map((node: any) => {
+        if (node.case_value?.kind === 'PRODUCT_BRAND') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_brand: { value: node.case_value.value } } };
+        if (node.case_value?.kind === 'PRODUCT_CATEGORY') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_category: { category_id: node.case_value.category_id, level: node.case_value.level } } };
+        if (node.case_value?.kind === 'PRODUCT_CHANNEL') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_channel: { channel: node.case_value.channel } } };
+        if (node.case_value?.kind === 'PRODUCT_CONDITION') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_condition: { condition: node.case_value.condition } } };
+        if (node.case_value?.kind === 'PRODUCT_CUSTOM_ATTRIBUTE') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_custom_attribute: { index: node.case_value.index, value: node.case_value.value } } };
+        if (node.case_value?.kind === 'PRODUCT_ITEM_ID') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_item_id: { value: node.case_value.value } } };
+        if (node.case_value?.kind === 'PRODUCT_TYPE') return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index, caseValue: { product_type: { level: node.case_value.level, value: node.case_value.value } } };
+        if (node.case_value?.kind === 'WEBPAGE') return { type: node.type, parentIndex: node.parent_index, caseValue: { webpage: { conditions: node.case_value.conditions } } };
+        return { type: node.type, listingSource: node.listing_source, parentIndex: node.parent_index };
+      })));
+  }
+
+  if (mutation.action === 'image_asset_upload_from_url') return ok(await uploadImageAssetFromUrl(cfg, p.customer_id, p.asset_name, p.image_url, MAX_IMAGE_BYTES));
+  if (mutation.action === 'image_asset_upload_from_file') return ok(await uploadImageAssetFromFile(cfg, p.customer_id, p.asset_name, p.file_path, MAX_IMAGE_BYTES));
+
+  if (mutation.action === 'sitelink_assets_create') {
+    return ok(await createSitelinkAssets(cfg, p.customer_id,
+      p.sitelinks.map((s: any) => ({ linkText: s.link_text, description1: s.description1 || '', description2: s.description2 || '', finalUrl: s.final_url }))));
+  }
+
+  if (mutation.action === 'callout_assets_create') return ok(await createCalloutAssets(cfg, p.customer_id, p.callouts));
+  if (mutation.action === 'call_asset_create') return ok(await createCallAsset(cfg, p.customer_id, p.country_code, p.phone_number));
+  if (mutation.action === 'structured_snippet_assets_create') return ok(await createStructuredSnippetAssets(cfg, p.customer_id, p.header, p.values));
+
+  if (mutation.action === 'bidding_strategy_change') {
+    return ok(await mutateBiddingStrategy(cfg, p.customer_id, p.campaign_id, {
+      type: p.strategy_type, targetCpaMicros: p.target_cpa_micros, targetRoas: p.target_roas,
+    }));
+  }
+
+  if (mutation.action === 'campaign_extensions_batch') {
+    return ok(await createCampaignExtensions(cfg, p.customer_id, p.campaign_id, {
+      sitelinks: p.sitelinks?.map((s: any) => ({ linkText: s.link_text, description1: s.description1 || '', description2: s.description2 || '', finalUrl: s.final_url })),
+      callouts: p.callouts,
+      call: p.call ? { countryCode: p.call.country_code, phoneNumber: p.call.phone_number } : undefined,
+      structuredSnippet: p.structured_snippet ? { header: p.structured_snippet.header, values: p.structured_snippet.values } : undefined,
+      existingAssetLinks: p.existing_asset_links?.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type })),
+    }));
+  }
+
+  return `Error: Unknown action: ${mutation.action}`;
+}
+
+function formatMutationError(err: any): string {
+  const details = err.statusDetails?.[0]?.errors;
+  return details ? JSON.stringify(details) : (typeof err.message === 'string' ? err.message : JSON.stringify(err.message ?? err)) || 'Unknown Google Ads API error';
 }
 
 export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
@@ -1678,370 +1818,63 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       }
 
       try {
-        const p = mutation.params as Record<string, any>;
-
-        if (mutation.action === 'campaign_status') {
-          await mutateCampaignStatus(cfg, p.customer_id, p.campaign_id, p.new_status);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.` }] };
-        }
-
-        if (mutation.action === 'campaign_removal') {
-          const result = await removeCampaigns(
-            cfg,
-            p.customer_id,
-            p.campaigns.map((campaign: any) => campaign.campaign_id),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'budget_change') {
-          await mutateCampaignBudget(cfg, p.customer_id, p.budget_id, p.amount_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.` }] };
-        }
-
-        if (mutation.action === 'search_campaign_create') {
-          const result = await createSearchCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'display_campaign_create') {
-          const result = await createDisplayCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'performance_max_campaign_create') {
-          const result = await createPerformanceMaxCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros, {
-            businessNameAssetId: p.business_name_asset_id,
-            logoAssetId: p.logo_asset_id,
-          });
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'ad_group_create') {
-          const result = await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'display_ad_group_create') {
-          const result = await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'asset_group_create') {
-          const result = await createAssetGroup(
-            cfg,
-            p.customer_id,
-            p.campaign_id,
-            p.asset_group_name,
-            p.final_urls,
-            p.assets.map((asset: any) => ({
-              assetId: asset.asset_id,
-              fieldType: asset.field_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'responsive_search_ad_create') {
-          const result = await createResponsiveSearchAd(cfg, p.customer_id, p.ad_group_id, p.headlines, p.descriptions, p.final_url);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'responsive_display_ad_create') {
-          const result = await createResponsiveDisplayAd(
-            cfg,
-            p.customer_id,
-            p.ad_group_id,
-            p.business_name,
-            p.headlines,
-            p.long_headline,
-            p.descriptions,
-            p.final_url,
-            p.marketing_image_asset_ids,
-            p.square_marketing_image_asset_ids,
-            p.logo_image_asset_ids,
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'keywords_create') {
-          const result = await createKeywords(
-            cfg,
-            p.customer_id,
-            p.ad_group_id,
-            p.keywords.map((keyword: any) => ({
-              text: keyword.text,
-              matchType: keyword.match_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'negative_keywords_create') {
-          const target = p.level === 'campaign'
-            ? { level: 'campaign' as const, campaignId: p.campaign_id }
-            : { level: 'ad_group' as const, adGroupId: p.ad_group_id };
-          const result = await createNegativeKeywords(
-            cfg,
-            p.customer_id,
-            target,
-            p.keywords.map((keyword: any) => ({
-              text: keyword.text,
-              matchType: keyword.match_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'campaign_targeting_create') {
-          const result = await createCampaignTargeting(
-            cfg,
-            p.customer_id,
-            p.campaign_id,
-            {
-              locationCriterionIds: p.location_criterion_ids,
-              languageCriterionIds: p.language_criterion_ids,
-            },
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'campaign_assets_link') {
-          const result = await linkCampaignAssets(
-            cfg,
-            p.customer_id,
-            p.campaign_id,
-            p.assets.map((asset: any) => ({
-              assetId: asset.asset_id,
-              fieldType: asset.field_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'ad_group_assets_link') {
-          const result = await linkAdGroupAssets(
-            cfg,
-            p.customer_id,
-            p.ad_group_id,
-            p.assets.map((asset: any) => ({
-              assetId: asset.asset_id,
-              fieldType: asset.field_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'asset_group_assets_create') {
-          const result = await createAssetGroupAssets(
-            cfg,
-            p.customer_id,
-            p.asset_group_id,
-            p.assets.map((asset: any) => ({
-              assetId: asset.asset_id,
-              fieldType: asset.field_type,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'asset_group_signals_create') {
-          const result = await createAssetGroupSignals(
-            cfg,
-            p.customer_id,
-            p.asset_group_id,
-            p.signals.map((signal: any) => (
-              signal.type === 'SEARCH_THEME'
-                ? { type: 'SEARCH_THEME' as const, text: signal.text }
-                : { type: 'AUDIENCE' as const, audienceId: signal.audience_id }
-            )),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'asset_group_listing_group_filters_create') {
-          const result = await createAssetGroupListingGroupFilters(
-            cfg,
-            p.customer_id,
-            p.asset_group_id,
-            p.nodes.map((node: any) => {
-              if (node.case_value?.kind === 'PRODUCT_BRAND') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_brand: { value: node.case_value.value },
-                },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_CATEGORY') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_category: {
-                      category_id: node.case_value.category_id,
-                      level: node.case_value.level,
-                    },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_CHANNEL') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_channel: { channel: node.case_value.channel },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_CONDITION') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_condition: { condition: node.case_value.condition },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_CUSTOM_ATTRIBUTE') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_custom_attribute: {
-                      index: node.case_value.index,
-                      value: node.case_value.value,
-                    },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_ITEM_ID') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_item_id: { value: node.case_value.value },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'PRODUCT_TYPE') {
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  product_type: {
-                      level: node.case_value.level,
-                      value: node.case_value.value,
-                    },
-                  },
-                };
-              }
-              if (node.case_value?.kind === 'WEBPAGE') {
-              return {
-                type: node.type,
-                parentIndex: node.parent_index,
-                caseValue: {
-                  webpage: {
-                      conditions: node.case_value.conditions,
-                    },
-                  },
-                };
-              }
-              return {
-                type: node.type,
-                listingSource: node.listing_source,
-                parentIndex: node.parent_index,
-              };
-            }),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'image_asset_upload_from_url') {
-          const result = await uploadImageAssetFromUrl(
-            cfg,
-            p.customer_id,
-            p.asset_name,
-            p.image_url,
-            MAX_IMAGE_BYTES,
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'image_asset_upload_from_file') {
-          const result = await uploadImageAssetFromFile(
-            cfg,
-            p.customer_id,
-            p.asset_name,
-            p.file_path,
-            MAX_IMAGE_BYTES,
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'sitelink_assets_create') {
-          const result = await createSitelinkAssets(
-            cfg,
-            p.customer_id,
-            p.sitelinks.map((s: any) => ({
-              linkText: s.link_text,
-              description1: s.description1 || '',
-              description2: s.description2 || '',
-              finalUrl: s.final_url,
-            })),
-          );
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'callout_assets_create') {
-          const result = await createCalloutAssets(cfg, p.customer_id, p.callouts);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'call_asset_create') {
-          const result = await createCallAsset(cfg, p.customer_id, p.country_code, p.phone_number);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'structured_snippet_assets_create') {
-          const result = await createStructuredSnippetAssets(cfg, p.customer_id, p.header, p.values);
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'bidding_strategy_change') {
-          const result = await mutateBiddingStrategy(cfg, p.customer_id, p.campaign_id, {
-            type: p.strategy_type,
-            targetCpaMicros: p.target_cpa_micros,
-            targetRoas: p.target_roas,
-          });
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        if (mutation.action === 'campaign_extensions_batch') {
-          const result = await createCampaignExtensions(cfg, p.customer_id, p.campaign_id, {
-            sitelinks: p.sitelinks?.map((s: any) => ({ linkText: s.link_text, description1: s.description1 || '', description2: s.description2 || '', finalUrl: s.final_url })),
-            callouts: p.callouts,
-            call: p.call ? { countryCode: p.call.country_code, phoneNumber: p.call.phone_number } : undefined,
-            structuredSnippet: p.structured_snippet ? { header: p.structured_snippet.header, values: p.structured_snippet.values } : undefined,
-            existingAssetLinks: p.existing_asset_links?.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type })),
-          });
-          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
-        }
-
-        return { content: [{ type: 'text', text: `Error: Unknown action: ${mutation.action}` }] };
+        const result = await executeMutation(cfg, mutation);
+        return { content: [{ type: 'text', text: result }] };
       } catch (err: any) {
-        const details = err.statusDetails?.[0]?.errors;
-        const msg = details ? JSON.stringify(details) : (typeof err.message === 'string' ? err.message : JSON.stringify(err.message ?? err));
-        return { content: [{ type: 'text', text: `Error: ${msg || 'Unknown Google Ads API error'}` }] };
+        const errMsg = formatMutationError(err);
+        recordFailure(mutation.action, mutation.params as Record<string, any>, mutation.preview, errMsg);
+        return { content: [{ type: 'text', text: `Error: ${errMsg}` }] };
       }
+    },
+  );
+
+  server.tool(
+    'confirm_all_mutations',
+    'Execute ALL pending mutations in one batch. Use the same safe_word across multiple prepare_* calls, show combined preview, get one user confirmation, then call this. Requires user confirmation via safe word before calling.',
+    {
+      tokens: z.array(z.string()).min(1).max(50).describe('Array of confirmation tokens from prepare_* responses'),
+    },
+    async ({ tokens }) => {
+      const validated: PendingMutation[] = [];
+      for (const token of tokens) {
+        const m = getPendingToken(token);
+        if (!m) {
+          return { content: [{ type: 'text', text: `Error: Token ${token} is invalid or expired. Prepare the operations again using prepare_*.` }] };
+        }
+        validated.push(m);
+      }
+
+      const latest = validated.reduce((a, b) => a.createdAt > b.createdAt ? a : b);
+      const confirmState = consumeConfirmState(latest);
+      if (!confirmState.ok) {
+        return { content: [{ type: 'text', text: `Error: ${confirmState.error}` }] };
+      }
+
+      const batchId = `batch-${Date.now()}`;
+      const results: string[] = [];
+      let succeeded = 0;
+      let failed = 0;
+      for (let i = 0; i < tokens.length; i++) {
+        const mutation = consumeToken(tokens[i]);
+        if (!mutation) {
+          results.push(`[${i + 1}/${tokens.length}] Error: Token expired during batch execution.`);
+          failed++;
+          continue;
+        }
+        try {
+          const result = await executeMutation(cfg, mutation, batchId);
+          results.push(`[${i + 1}/${tokens.length}] ${result}`);
+          succeeded++;
+        } catch (err: any) {
+          const errMsg = formatMutationError(err);
+          recordFailure(mutation.action, mutation.params as Record<string, any>, mutation.preview, errMsg, batchId);
+          results.push(`[${i + 1}/${tokens.length}] Error [${mutation.action}]: ${errMsg}`);
+          failed++;
+        }
+      }
+
+      const summary = `Batch complete: ${succeeded} succeeded, ${failed} failed out of ${tokens.length} operations.`;
+      return { content: [{ type: 'text', text: `${summary}\n\n${results.join('\n\n')}` }] };
     },
   );
 
