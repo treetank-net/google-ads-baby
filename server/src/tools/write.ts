@@ -10,6 +10,7 @@ import {
   createAssetGroupSignals,
   createCallAsset,
   createCalloutAssets,
+  createCampaignExtensions,
   createCampaignTargeting,
   createDisplayAdGroup,
   createDisplayCampaign,
@@ -769,6 +770,60 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
         strategy_type,
         target_cpa_micros: target_cpa_pln ? Math.round(target_cpa_pln * 1_000_000) : undefined,
         target_roas,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_campaign_extensions',
+    'Prepare batch creation of campaign extensions (sitelinks, callouts, call, structured snippets) AND link them to a campaign in one atomic operation. Can also link existing assets (images, logos). Single confirmation for everything.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Existing campaign ID'),
+      sitelinks: z.array(z.object({
+        link_text: z.string().min(1).max(25),
+        description1: z.string().max(35).default(''),
+        description2: z.string().max(35).default(''),
+        final_url: z.string().min(1),
+      })).max(20).default([]).describe('Sitelinks to create and link'),
+      callouts: z.array(z.string().min(1).max(25)).max(20).default([]).describe('Callout texts to create and link'),
+      call: z.object({
+        country_code: z.string().min(2).max(2),
+        phone_number: z.string().min(5).max(25),
+      }).optional().describe('Phone extension to create and link'),
+      structured_snippet: z.object({
+        header: z.string().min(1),
+        values: z.array(z.string().min(1).max(25)).min(3).max(10),
+      }).optional().describe('Structured snippet to create and link'),
+      existing_asset_links: z.array(z.object({
+        asset_id: z.string(),
+        field_type: campaignAssetFieldTypeSchema,
+      })).max(20).default([]).describe('Existing assets to link (e.g. images with AD_IMAGE, logos with LOGO)'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, campaign_id, sitelinks, callouts, call, structured_snippet, existing_asset_links, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const total = sitelinks.length + callouts.length + (call ? 1 : 0) + (structured_snippet ? 1 : 0) + existing_asset_links.length;
+      if (total < 1) return validationResult('Provide at least one extension to create or link.');
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const lines = [`Batch campaign extensions for campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`];
+      if (sitelinks.length) lines.push(`Sitelinks (${sitelinks.length}): ${sitelinks.map((s) => s.link_text).join(', ')}`);
+      if (callouts.length) lines.push(`Callouts (${callouts.length}): ${callouts.join(', ')}`);
+      if (call) lines.push(`Call: +${call.country_code} ${call.phone_number}`);
+      if (structured_snippet) lines.push(`Snippet: ${structured_snippet.header} → ${structured_snippet.values.join(', ')}`);
+      if (existing_asset_links.length) lines.push(`Link existing (${existing_asset_links.length}): ${existing_asset_links.map((a) => `${a.field_type}:${a.asset_id}`).join(', ')}`);
+      const preview = lines.join('\n');
+      const mutation = createToken('campaign_extensions_batch', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        sitelinks: sitelinks.map((s) => ({ link_text: s.link_text, description1: s.description1, description2: s.description2, final_url: s.final_url })),
+        callouts,
+        call: call ? { country_code: call.country_code.toUpperCase(), phone_number: call.phone_number } : undefined,
+        structured_snippet: structured_snippet ? { header: structured_snippet.header, values: structured_snippet.values } : undefined,
+        existing_asset_links: existing_asset_links.map((a) => ({ asset_id: normalizeResourceId(a.asset_id), field_type: a.field_type })),
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
@@ -1966,6 +2021,17 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
             type: p.strategy_type,
             targetCpaMicros: p.target_cpa_micros,
             targetRoas: p.target_roas,
+          });
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'campaign_extensions_batch') {
+          const result = await createCampaignExtensions(cfg, p.customer_id, p.campaign_id, {
+            sitelinks: p.sitelinks?.map((s: any) => ({ linkText: s.link_text, description1: s.description1 || '', description2: s.description2 || '', finalUrl: s.final_url })),
+            callouts: p.callouts,
+            call: p.call ? { countryCode: p.call.country_code, phoneNumber: p.call.phone_number } : undefined,
+            structuredSnippet: p.structured_snippet ? { header: p.structured_snippet.header, values: p.structured_snippet.values } : undefined,
+            existingAssetLinks: p.existing_asset_links?.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type })),
           });
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }

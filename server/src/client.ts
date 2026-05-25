@@ -511,6 +511,115 @@ export async function createResponsiveDisplayAd(
   ]);
 }
 
+export interface CampaignExtensionsInput {
+  sitelinks?: Array<{ linkText: string; description1: string; description2: string; finalUrl: string }>;
+  callouts?: string[];
+  call?: { countryCode: string; phoneNumber: string };
+  structuredSnippet?: { header: string; values: string[] };
+  existingAssetLinks?: Array<{ assetId: string; fieldType: string }>;
+}
+
+export async function createCampaignExtensions(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  input: CampaignExtensionsInput,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const ops: any[] = [];
+  let tempId = -1;
+  const campaignResource = ResourceNames.campaign(customerId, campaignId);
+
+  for (const s of input.sitelinks ?? []) {
+    const assetResource = ResourceNames.asset(customerId, String(tempId));
+    ops.push({
+      entity: 'asset',
+      operation: 'create',
+      resource: {
+        resource_name: assetResource,
+        name: s.linkText,
+        type: enums.AssetType.SITELINK,
+        sitelink_asset: { link_text: s.linkText, description1: s.description1, description2: s.description2, final_urls: [s.finalUrl] },
+      },
+    });
+    ops.push({
+      entity: 'campaign_asset',
+      operation: 'create',
+      resource: { campaign: campaignResource, asset: assetResource, field_type: enums.AssetFieldType.SITELINK },
+    });
+    tempId--;
+  }
+
+  for (const text of input.callouts ?? []) {
+    const assetResource = ResourceNames.asset(customerId, String(tempId));
+    ops.push({
+      entity: 'asset',
+      operation: 'create',
+      resource: { resource_name: assetResource, name: text, type: enums.AssetType.CALLOUT, callout_asset: { callout_text: text } },
+    });
+    ops.push({
+      entity: 'campaign_asset',
+      operation: 'create',
+      resource: { campaign: campaignResource, asset: assetResource, field_type: enums.AssetFieldType.CALLOUT },
+    });
+    tempId--;
+  }
+
+  if (input.call) {
+    const assetResource = ResourceNames.asset(customerId, String(tempId));
+    ops.push({
+      entity: 'asset',
+      operation: 'create',
+      resource: {
+        resource_name: assetResource,
+        name: `${input.call.countryCode} ${input.call.phoneNumber}`,
+        type: enums.AssetType.CALL,
+        call_asset: { country_code: input.call.countryCode, phone_number: input.call.phoneNumber },
+      },
+    });
+    ops.push({
+      entity: 'campaign_asset',
+      operation: 'create',
+      resource: { campaign: campaignResource, asset: assetResource, field_type: enums.AssetFieldType.CALL },
+    });
+    tempId--;
+  }
+
+  if (input.structuredSnippet) {
+    const assetResource = ResourceNames.asset(customerId, String(tempId));
+    ops.push({
+      entity: 'asset',
+      operation: 'create',
+      resource: {
+        resource_name: assetResource,
+        name: `${input.structuredSnippet.header}: ${input.structuredSnippet.values.join(', ')}`,
+        type: enums.AssetType.STRUCTURED_SNIPPET,
+        structured_snippet_asset: { header: input.structuredSnippet.header, values: input.structuredSnippet.values },
+      },
+    });
+    ops.push({
+      entity: 'campaign_asset',
+      operation: 'create',
+      resource: { campaign: campaignResource, asset: assetResource, field_type: enums.AssetFieldType.STRUCTURED_SNIPPET },
+    });
+    tempId--;
+  }
+
+  for (const link of input.existingAssetLinks ?? []) {
+    ops.push({
+      entity: 'campaign_asset',
+      operation: 'create',
+      resource: {
+        campaign: campaignResource,
+        asset: ResourceNames.asset(customerId, link.assetId),
+        field_type: (enums.AssetFieldType as any)[link.fieldType],
+      },
+    });
+  }
+
+  return customer.mutateResources(ops);
+}
+
 export async function createSitelinkAssets(
   cfg: AdsConfig,
   customerId: string,
