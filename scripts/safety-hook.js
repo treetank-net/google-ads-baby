@@ -102,14 +102,14 @@ function run() {
   if (mode === 'pre-tool') {
     const toolName = extractToolName();
 
-    if (/^mcp__google[-_]ads__prepare_/.test(toolName)) {
+    if (/google[-_]ads__prepare_/.test(toolName)) {
       writeState('pending');
       const safeWord = extractSafeWord();
       if (safeWord) writeFileSync(SAFE_WORD_FILE, safeWord);
       process.exit(0);
     }
 
-    if (/^mcp__google[-_]ads__confirm_mutation$/.test(toolName)) {
+    if (/google[-_]ads__confirm_mutation/.test(toolName)) {
       if (safetyLevel === 'off' || process.env.GOOGLE_ADS_YOLO === '1') {
         try { unlinkSync(STATE_FILE); } catch {}
         process.exit(0);
