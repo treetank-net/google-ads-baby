@@ -511,6 +511,99 @@ export async function createResponsiveDisplayAd(
   ]);
 }
 
+export async function createSitelinkAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  sitelinks: Array<{ linkText: string; description1: string; description2: string; finalUrl: string }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assets.create(sitelinks.map((s) => ({
+    name: s.linkText,
+    type: enums.AssetType.SITELINK,
+    sitelink_asset: {
+      link_text: s.linkText,
+      description1: s.description1,
+      description2: s.description2,
+      final_urls: [s.finalUrl],
+    },
+  })) as any);
+}
+
+export async function createCalloutAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  callouts: string[],
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assets.create(callouts.map((text) => ({
+    name: text,
+    type: enums.AssetType.CALLOUT,
+    callout_asset: {
+      callout_text: text,
+    },
+  })) as any);
+}
+
+export async function createCallAsset(
+  cfg: AdsConfig,
+  customerId: string,
+  countryCode: string,
+  phoneNumber: string,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assets.create([{
+    name: `${countryCode} ${phoneNumber}`,
+    type: enums.AssetType.CALL,
+    call_asset: {
+      country_code: countryCode,
+      phone_number: phoneNumber,
+    },
+  }] as any);
+}
+
+export async function createStructuredSnippetAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  header: string,
+  values: string[],
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.assets.create([{
+    name: `${header}: ${values.join(', ')}`,
+    type: enums.AssetType.STRUCTURED_SNIPPET,
+    structured_snippet_asset: {
+      header,
+      values,
+    },
+  }] as any);
+}
+
+export async function mutateBiddingStrategy(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  strategy: { type: string; targetCpaMicros?: number; targetRoas?: number },
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const resource: Record<string, any> = {
+    resource_name: `customers/${customerId}/campaigns/${campaignId}`,
+  };
+  if (strategy.type === 'TARGET_CPA') {
+    resource.target_cpa = { target_cpa_micros: strategy.targetCpaMicros };
+  } else if (strategy.type === 'TARGET_ROAS') {
+    resource.target_roas = { target_roas: strategy.targetRoas };
+  } else if (strategy.type === 'MAXIMIZE_CONVERSIONS') {
+    resource.maximize_conversions = {};
+  } else if (strategy.type === 'MAXIMIZE_CONVERSION_VALUE') {
+    resource.maximize_conversion_value = {};
+  } else if (strategy.type === 'MANUAL_CPC') {
+    resource.manual_cpc = { enhanced_cpc_enabled: false };
+  } else if (strategy.type === 'ENHANCED_CPC') {
+    resource.manual_cpc = { enhanced_cpc_enabled: true };
+  }
+  return customer.campaigns.update([resource]);
+}
+
 export async function linkCampaignAssets(
   cfg: AdsConfig,
   customerId: string,

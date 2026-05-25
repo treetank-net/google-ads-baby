@@ -8,6 +8,8 @@ import {
   createAssetGroupAssets,
   createAssetGroupListingGroupFilters,
   createAssetGroupSignals,
+  createCallAsset,
+  createCalloutAssets,
   createCampaignTargeting,
   createDisplayAdGroup,
   createDisplayCampaign,
@@ -17,9 +19,12 @@ import {
   createResponsiveDisplayAd,
   createResponsiveSearchAd,
   createSearchCampaign,
+  createSitelinkAssets,
+  createStructuredSnippetAssets,
   executeGaql,
   linkAdGroupAssets,
   linkCampaignAssets,
+  mutateBiddingStrategy,
   mutateCampaignBudget,
   mutateCampaignStatus,
   removeCampaigns,
@@ -76,7 +81,7 @@ const campaignAssetFieldTypeSchema = z.enum([
   'CALL',
   'CALLOUT',
   'STRUCTURED_SNIPPET',
-  'IMAGE',
+  'AD_IMAGE',
   'LOGO',
   'PROMOTION',
   'PRICE',
@@ -84,7 +89,7 @@ const campaignAssetFieldTypeSchema = z.enum([
 ]);
 const campaignAssetSchema = z.object({
   asset_id: z.string().describe('Existing asset ID (from prepare_image_asset_* or execute_gaql)'),
-  field_type: campaignAssetFieldTypeSchema.describe('Asset field type for campaign-level linking, e.g. IMAGE for image extensions'),
+  field_type: campaignAssetFieldTypeSchema.describe('Asset field type for campaign-level linking, e.g. AD_IMAGE for image extensions in Search'),
 });
 const adGroupAssetFieldTypeSchema = z.enum([
   'HEADLINE',
@@ -93,7 +98,7 @@ const adGroupAssetFieldTypeSchema = z.enum([
   'CALL',
   'CALLOUT',
   'STRUCTURED_SNIPPET',
-  'IMAGE',
+  'AD_IMAGE',
   'PROMOTION',
   'PRICE',
 ]);
@@ -622,6 +627,153 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
+    'prepare_sitelink_assets',
+    'Prepare creation of sitelink assets. After creation, link them to a campaign via prepare_campaign_assets with field_type SITELINK. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      sitelinks: z.array(z.object({
+        link_text: z.string().min(1).max(25).describe('Sitelink text shown in the ad, max 25 chars'),
+        description1: z.string().max(35).default('').describe('First description line, max 35 chars'),
+        description2: z.string().max(35).default('').describe('Second description line, max 35 chars'),
+        final_url: z.string().min(1).describe('Landing page URL for this sitelink'),
+      })).min(1).max(20).describe('Sitelinks to create'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, sitelinks, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = [
+        `Create ${sitelinks.length} sitelink asset(s) on account ${normalizedCustomerId}`,
+        ...sitelinks.map((s) => `- "${s.link_text}" → ${s.final_url}`),
+      ].join('\n');
+      const mutation = createToken('sitelink_assets_create', {
+        customer_id: normalizedCustomerId,
+        sitelinks: sitelinks.map((s) => ({
+          link_text: s.link_text,
+          description1: s.description1,
+          description2: s.description2,
+          final_url: s.final_url,
+        })),
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_callout_assets',
+    'Prepare creation of callout assets (short USP phrases like "Free shipping", "24/7 support"). After creation, link them to a campaign via prepare_campaign_assets with field_type CALLOUT. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      callouts: z.array(z.string().min(1).max(25)).min(1).max(20).describe('Callout texts, max 25 chars each'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, callouts, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = [
+        `Create ${callouts.length} callout asset(s) on account ${normalizedCustomerId}`,
+        ...callouts.map((c) => `- "${c}"`),
+      ].join('\n');
+      const mutation = createToken('callout_assets_create', {
+        customer_id: normalizedCustomerId,
+        callouts,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_call_asset',
+    'Prepare creation of a call (phone) asset for click-to-call extensions. After creation, link it to a campaign via prepare_campaign_assets with field_type CALL. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      country_code: z.string().min(2).max(2).describe('Two-letter country code, e.g. PL, US, DE'),
+      phone_number: z.string().min(5).max(25).describe('Phone number in local or international format'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, country_code, phone_number, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = `Create call asset +${country_code} ${phone_number} on account ${normalizedCustomerId}`;
+      const mutation = createToken('call_asset_create', {
+        customer_id: normalizedCustomerId,
+        country_code: country_code.toUpperCase(),
+        phone_number,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_structured_snippet_assets',
+    'Prepare creation of structured snippet assets (e.g. header "Types" with values "Sedan, SUV, Truck"). After creation, link to a campaign via prepare_campaign_assets with field_type STRUCTURED_SNIPPET. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      header: z.string().min(1).describe('Snippet header — must be a predefined Google Ads header, e.g. "Brands", "Types", "Destinations", "Courses", "Services", "Styles", "Amenities"'),
+      values: z.array(z.string().min(1).max(25)).min(3).max(10).describe('Snippet values, 3-10 items, max 25 chars each'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, header, values, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const preview = [
+        `Create structured snippet asset on account ${normalizedCustomerId}`,
+        `Header: ${header}`,
+        `Values: ${values.join(', ')}`,
+      ].join('\n');
+      const mutation = createToken('structured_snippet_assets_create', {
+        customer_id: normalizedCustomerId,
+        header,
+        values,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_bidding_strategy',
+    'Prepare changing the bidding strategy of a campaign (e.g. from Manual CPC to Target CPA or Target ROAS). Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Existing campaign ID'),
+      strategy_type: z.enum(['TARGET_CPA', 'TARGET_ROAS', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'MANUAL_CPC', 'ENHANCED_CPC']).describe('Bidding strategy type'),
+      target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN (required for TARGET_CPA)'),
+      target_roas: z.number().positive().optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400% ROAS (required for TARGET_ROAS)'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, campaign_id, strategy_type, target_cpa_pln, target_roas, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      if (strategy_type === 'TARGET_CPA' && !target_cpa_pln) {
+        return validationResult('target_cpa_pln is required for TARGET_CPA strategy.');
+      }
+      if (strategy_type === 'TARGET_ROAS' && !target_roas) {
+        return validationResult('target_roas is required for TARGET_ROAS strategy.');
+      }
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const strategyDetails = strategy_type === 'TARGET_CPA'
+        ? `Target CPA: ${target_cpa_pln} PLN`
+        : strategy_type === 'TARGET_ROAS'
+        ? `Target ROAS: ${target_roas}x`
+        : strategy_type;
+      const preview = `Change bidding strategy of campaign ${normalizedCampaignId} to ${strategyDetails}, account ${normalizedCustomerId}`;
+      const mutation = createToken('bidding_strategy_change', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        strategy_type,
+        target_cpa_micros: target_cpa_pln ? Math.round(target_cpa_pln * 1_000_000) : undefined,
+        target_roas,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_search_campaign',
     'Prepare creation of a paused Search campaign with a daily budget. Returns a preview and confirmation token.',
     {
@@ -1076,7 +1228,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const unique = new Set(normalizedAssets.map((a) => `${a.asset_id}:${a.field_type}`));
       if (unique.size !== normalizedAssets.length) return validationResult('Duplicate asset links in request.');
 
-      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'IMAGE');
+      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'AD_IMAGE');
       if (imageAssets.length) {
         const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((a) => a.asset_id));
         const placementError = validateAssetPlacement('Image extension', imageAssets.map((a) => a.asset_id), imageInfo, 0.8, 2.1);
@@ -1117,7 +1269,7 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
       const unique = new Set(normalizedAssets.map((a) => `${a.asset_id}:${a.field_type}`));
       if (unique.size !== normalizedAssets.length) return validationResult('Duplicate asset links in request.');
 
-      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'IMAGE');
+      const imageAssets = normalizedAssets.filter((a) => a.field_type === 'AD_IMAGE');
       if (imageAssets.length) {
         const imageInfo = await loadImageAssetInfo(cfg, normalizedCustomerId, imageAssets.map((a) => a.asset_id));
         const placementError = validateAssetPlacement('Image extension', imageAssets.map((a) => a.asset_id), imageInfo, 0.8, 2.1);
@@ -1776,6 +1928,44 @@ export function registerWriteTools(server: McpServer, cfg: AdsConfig) {
             p.file_path,
             MAX_IMAGE_BYTES,
           );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'sitelink_assets_create') {
+          const result = await createSitelinkAssets(
+            cfg,
+            p.customer_id,
+            p.sitelinks.map((s: any) => ({
+              linkText: s.link_text,
+              description1: s.description1 || '',
+              description2: s.description2 || '',
+              finalUrl: s.final_url,
+            })),
+          );
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'callout_assets_create') {
+          const result = await createCalloutAssets(cfg, p.customer_id, p.callouts);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'call_asset_create') {
+          const result = await createCallAsset(cfg, p.customer_id, p.country_code, p.phone_number);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'structured_snippet_assets_create') {
+          const result = await createStructuredSnippetAssets(cfg, p.customer_id, p.header, p.values);
+          return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
+        }
+
+        if (mutation.action === 'bidding_strategy_change') {
+          const result = await mutateBiddingStrategy(cfg, p.customer_id, p.campaign_id, {
+            type: p.strategy_type,
+            targetCpaMicros: p.target_cpa_micros,
+            targetRoas: p.target_roas,
+          });
           return { content: [{ type: 'text', text: `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}` }] };
         }
 
