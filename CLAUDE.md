@@ -7,8 +7,9 @@ Claude Code plugin: MCP server for Google Ads campaign management with two-phase
 Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 
 ### MCP Server (`server/`)
-- TypeScript, `@modelcontextprotocol/sdk` (stdio), `google-ads-api` v23 (community, gRPC)
-- Build: `npm run build` (tsc), runtime: `node dist/index.js`
+- TypeScript source in `server/src/`, compiled with `tsc`, bundled with `esbuild` into single `server/bundle.cjs`
+- `google-ads-api` v23 (community, gRPC), `@modelcontextprotocol/sdk` (stdio), `zod`
+- All dependencies bundled — no `node_modules` needed at runtime, cold start ~0.8s
 - Read tools: `list_accounts`, `get_campaigns`, `execute_gaql`
 - Write tools: `prepare_campaign_status`, `prepare_budget_change` → `confirm_mutation`
 - Token store: in-memory, one-shot, 1h TTL
@@ -18,11 +19,12 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 - `UserPromptSubmit` → if pending and user message contains the LLM-selected safe word, sets state to "user-confirmed"
 - `PreToolUse` on `confirm_mutation` → blocks unless "user-confirmed"
 - Effect: LLM cannot call prepare + confirm in sequence without user message between them
+- Hooks written in pure JS (`scripts/safety-hook.js`) — cross-platform (Windows/macOS/Linux)
 
 ### Plugin Manifests
 - Claude Code: `.claude-plugin/plugin.json`
 - Codex: `.codex-plugin/plugin.json` + `.mcp.json` + root `hooks.json`
-- Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`; the wrapper uses `npx github:treetank-net/google-ads-baby` for MCP and hook commands
+- Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`; the wrapper uses `npx @treetank/google-ads-baby` for MCP and hook commands
 - Codex hook runtime currently may not activate plugin-local hooks; standalone hook package lives at `hooks/google-ads-baby-safety/hooks.json`
 
 ### Two-Phase Mutation Flow
@@ -31,20 +33,39 @@ Plugin = MCP server (stdio) + Claude Code/Codex hooks (safety enforcement).
 3. User types response containing the safe word → hook marks as confirmed
 4. LLM calls `confirm_mutation(token)` → hook allows → server executes
 
+### OAuth Flow & Custom App Credentials
+1. LLM calls `auth_google_ads` → starts local HTTP server on port 9876
+2. Browser opens `http://127.0.0.1:9876/open` → landing page with optional custom OAuth app fields
+3. User can expand "I want to use my own OAuth app credentials" and enter Client ID/Secret, or use the built-in default
+4. Custom credentials are saved to `config.json` and used for all subsequent OAuth flows
+5. After clicking "Sign in with Google" → standard OAuth consent → callback → dev token + account selection page
+
 ## Repo & CI
 - GitLab: `treetank/google-ads-baby` (origin, primary)
 - GitHub: `treetank-net/google-ads-baby` (mirror, remote `gh`)
 - `.gitlab-ci.yml`: mirror job pushuje `master` + tagi do GitHuba przy każdym pushu (runner tag: `vps`, wymaga `GITHUB_TREETANK_TOKEN` w CI/CD variables)
 
 ## Commands
-- `cd server && npm install && npm run build` — zainstaluj zależności i zbuduj
-- `cd server && npm run dev` — watch mode (rebuild przy zmianach)
-- `cd server && npm start` — uruchom MCP server (wymaga wcześniejszego buildu)
-- `npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global` — zainstaluj hooki bezpieczeństwa dla Codexa
+- `cd server && npm install && npm run build` — zainstaluj zależności, skompiluj TS i zbuduj bundle
+- `cd server && npm run dev` — watch mode (rebuild TS przy zmianach, bundle trzeba przebudować ręcznie)
+- `cd server && npm start` — uruchom MCP server z bundle.cjs
+- `cd server && npx esbuild dist/index.js --bundle --platform=node --target=node18 --format=cjs --minify --outfile=bundle.cjs` — przebuduj bundle ręcznie
+
+## Build
+1. `cd server && npm install` — zainstaluj zależności (tylko do developmentu)
+2. `npx tsc` — kompilacja TS → `server/dist/` (intermediate, nie w git)
+3. `npx esbuild dist/index.js --bundle --platform=node --target=node18 --format=cjs --minify --outfile=bundle.cjs` — bundle → `server/bundle.cjs` (w git, dystrybuowany)
+4. Albo po prostu: `npm run build` — robi krok 2 i 3 razem
+
+### Co jest w git, a co nie
+- `server/src/` — źródła TypeScript ✓
+- `server/bundle.cjs` — zbundlowany runtime (25MB, zawiera wszystkie deps) ✓
+- `server/dist/` — intermediate output z tsc ✗ (w .gitignore)
+- `server/node_modules/` — zależności dev ✗ (w .gitignore)
 
 ## Config
-All via env vars (set in plugin.json, sourced from user's environment):
-- `GOOGLE_ADS_CLIENT_ID` / `GOOGLE_ADS_CLIENT_SECRET` — OAuth2 app
+Env vars (set in plugin.json, sourced from user's environment) OR saved in `config.json` via OAuth flow:
+- `GOOGLE_ADS_CLIENT_ID` / `GOOGLE_ADS_CLIENT_SECRET` — OAuth2 app (optional — can be set via /open page, defaults to built-in app)
 - `GOOGLE_ADS_REFRESH_TOKEN` — user's OAuth2 refresh token
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
@@ -105,24 +126,33 @@ Problem: mutacje na koncie reklamowym przez LLM = ryzyko (halucynacja → wydany
   bez hooków (Cursor, inne). Bardziej uniwersalny, ale gorszy UX niż naturalny chat flow.
   Może jako opcja w przyszłości.
 
-## Kolejne kroki
+### Bundling — dlaczego jeden plik CJS
 
-Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, testy e2e),
-średnioterminowe (OS dialog fallback, audit log, rate limiting) i otwarte pytania
-(gRPC vs REST, scope tooli, dystrybucja).
+Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
+`google-ads-api` ciągnie ~80MB zależności (protobuf, gRPC).
+
+- **npx z github:** — timeout 30-60s na clone + install
+- **npm install w start-mcp.js** — ~2.4s po cache, ale cold start dalej za długi
+- **esbuild bundle** — jeden plik CJS, 25MB, cold start 0.8s, zero zależności runtime
+- ESM bundle nie działał — `google-ads-node` używa dynamic `require()`, Node rzucał `ERR_AMBIGUOUS_MODULE_SYNTAX`
+- CJS bundle wymaga braku top-level await — `index.ts` zawinięty w `async function main()`
+
+## Kolejne kroki
 
 ### Natychmiastowe
 - [x] Dodać `.gitignore`
 - [x] GitLab CI mirror do GitHuba (`treetank-net/google-ads-baby`)
 - [x] Poprawka mutacji — `customer.campaigns.update()` / `customer.campaignBudgets.update()`
 - [x] TypeScript kompiluje się bez błędów (`npm run build`)
+- [x] Hooki w czystym JS — cross-platform (Windows/macOS/Linux)
+- [x] Bundle CJS — cold start 0.8s zamiast 30-60s
+- [x] Custom OAuth app credentials w flow autoryzacji
 - [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (wymaga env vars)
 
 ### Krótkoterminowe
 - [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (dev token w trybie testowym)
 - [ ] Dodać `prepare_keyword_add` / `prepare_keyword_remove` — zarządzanie keywordami
 - [ ] Dodać `prepare_ad_group_status` — pauza/wznowienie ad groupów
-- [ ] Walidacja w safety.sh — timeout na pending state (jeśli user nie odpowiedział w 5 min → kasuj pending)
 - [ ] Lepsze error handling w MCP server (Google Ads API errors → czytelne komunikaty po polsku)
 
 ### Średnioterminowe
@@ -132,7 +162,6 @@ Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, tes
 - [ ] Konfigurowalny budget cap per-account (nie globalny 500 PLN)
 - [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania
       na wzór istniejącej. Cache na struktury kampanii (ad groupy, keywordy, ustawienia) jako template.
-- [ ] Dystrybucja przez marketplace (jak hooker)
 
 ### Podjęte decyzje
 - **Node.js + `google-ads-api`** — TypeScript + community `google-ads-api` v23 (gRPC).
@@ -141,3 +170,7 @@ Natychmiastowe (kompilacja, poprawka mutacji), krótkoterminowe (nowe toole, tes
 - **Marketplace** — standalone repo, ale instalacja przez marketplace (bez marketplace niewygodnie).
 - **Scope: read + manage + create** — LLM tworzy kampanie (często na wzór istniejących),
   zarządza istniejącymi, odczytuje dane. Cache na template'y kampanii.
+- **Bundle CJS, nie npm publish** — plugin dystrybuowany z GitHub marketplace, `bundle.cjs` w repo.
+  npm package niepotrzebny (był opublikowany jako `@treetank/google-ads-baby`, unpublished).
+- **Custom OAuth app** — user może podać własne Client ID/Secret w flow autoryzacji (/open page).
+  Domyślna appka jest wbudowana (desktop type, publiczne credentials per Google docs).

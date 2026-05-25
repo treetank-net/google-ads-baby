@@ -215,6 +215,93 @@ btnSave.onclick = async () => {
 };
 </script></body></html>`;
 
+function buildAuthUrl(clientId: string, stateParam: string, port: number): string {
+  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', `http://localhost:${port}/callback`);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', SCOPES.join(' '));
+  authUrl.searchParams.set('access_type', 'offline');
+  authUrl.searchParams.set('prompt', 'consent');
+  authUrl.searchParams.set('state', stateParam);
+  return authUrl.toString();
+}
+
+const OPEN_PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui; display:flex; justify-content:center; align-items:center;
+         min-height:100vh; margin:0; background:#f0f4f8; }
+  .card { background:white; padding:2.5rem; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.1);
+          max-width:520px; width:100%; }
+  h1 { color:#16a34a; margin:0 0 .5rem; font-size:1.5rem; }
+  p { color:#444; line-height:1.5; }
+  .custom-fields { display:none; margin:1rem 0; }
+  .custom-fields.show { display:block; }
+  label { display:block; font-weight:600; margin-bottom:.25rem; margin-top:.75rem; }
+  .hint { font-size:.85rem; color:#666; margin-bottom:.5rem; }
+  input { width:100%; padding:.6rem; border:1px solid #ddd; border-radius:6px; font-size:1rem; }
+  .buttons { margin-top:1.5rem; display:flex; gap:.75rem; flex-wrap:wrap; }
+  button { border:none; padding:.7rem 1.5rem; border-radius:6px; font-size:1rem; cursor:pointer; }
+  .btn-primary { background:#2563eb; color:white; }
+  .btn-primary:hover { background:#1d4ed8; }
+  .btn-secondary { background:#e2e8f0; color:#334155; }
+  .btn-secondary:hover { background:#cbd5e1; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .error { color:#dc2626; font-size:.9rem; margin-top:.5rem; }
+  .toggle { color:#2563eb; cursor:pointer; font-size:.9rem; margin-top:.75rem; display:inline-block; }
+  .toggle:hover { text-decoration:underline; }
+</style></head><body><div class="card">
+  <h1>Google Ads — Authorize</h1>
+  <p>Click below to sign in with Google and grant access to your Google Ads accounts.</p>
+  <span class="toggle" id="toggle-custom">I want to use my own OAuth app credentials</span>
+  <div class="custom-fields" id="custom-fields">
+    <label>Client ID</label>
+    <div class="hint">From <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a></div>
+    <input id="custom-id" placeholder="123456789-abc.apps.googleusercontent.com">
+    <label>Client Secret</label>
+    <input id="custom-secret" placeholder="GOCSPX-..." type="password">
+  </div>
+  <div class="buttons">
+    <button class="btn-primary" id="btn-go">Sign in with Google</button>
+  </div>
+  <div id="open-error" class="error"></div>
+</div>
+<script>
+const toggle = document.getElementById('toggle-custom');
+const fields = document.getElementById('custom-fields');
+let showCustom = false;
+toggle.onclick = () => {
+  showCustom = !showCustom;
+  fields.classList.toggle('show', showCustom);
+  toggle.textContent = showCustom
+    ? 'Use default app credentials'
+    : 'I want to use my own OAuth app credentials';
+};
+
+document.getElementById('btn-go').onclick = async () => {
+  const btn = document.getElementById('btn-go');
+  const errEl = document.getElementById('open-error');
+  errEl.textContent = '';
+  const clientId = document.getElementById('custom-id').value.trim();
+  const clientSecret = document.getElementById('custom-secret').value.trim();
+  if (showCustom && (!clientId || !clientSecret)) {
+    errEl.textContent = 'Both Client ID and Client Secret are required, or collapse the section to use the default app.';
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const res = await fetch('/start-oauth', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(showCustom ? { client_id: clientId, client_secret: clientSecret } : {})
+    });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; btn.disabled = false; return; }
+    window.location.href = data.url;
+  } catch (e) { errEl.textContent = 'Connection error: ' + e.message; btn.disabled = false; }
+};
+</script></body></html>`;
+
 export function startAuthFlow(cfg: AdsConfig): { url: string; shortUrl: string; port: number } {
   if (oauthState?.server) oauthState.server.close();
 
@@ -251,10 +338,28 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; shortUrl: string; 
     }
 
     if (url.pathname === '/open') {
-      const target = oauthState?.authUrl;
-      if (!target) { html(404, '<h1>Authorization flow not active</h1>'); return; }
-      res.writeHead(302, { Location: target });
-      res.end();
+      if (!oauthState) { html(404, '<h1>Authorization flow not active</h1>'); return; }
+      html(200, OPEN_PAGE);
+      return;
+    }
+
+    if (url.pathname === '/start-oauth' && req.method === 'POST') {
+      if (!oauthState) { json(404, { error: 'Authorization flow not active' }); return; }
+      try {
+        const body = JSON.parse(await readBody(req));
+        const customId = (body.client_id || '').trim();
+        const customSecret = (body.client_secret || '').trim();
+        if (customId && customSecret) {
+          cfg.clientId = customId;
+          cfg.clientSecret = customSecret;
+          await saveConfig({ clientId: customId, clientSecret: customSecret });
+        }
+        const authUrl = buildAuthUrl(cfg.clientId, oauthState.stateParam, oauthState.port);
+        oauthState.authUrl = authUrl;
+        json(200, { url: authUrl });
+      } catch (err: any) {
+        json(500, { error: err.message || String(err) });
+      }
       return;
     }
 
@@ -308,19 +413,10 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; shortUrl: string; 
 
   server.listen(port, '127.0.0.1');
 
-  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  authUrl.searchParams.set('client_id', cfg.clientId);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', SCOPES.join(' '));
-  authUrl.searchParams.set('access_type', 'offline');
-  authUrl.searchParams.set('prompt', 'consent');
-  authUrl.searchParams.set('state', stateParam);
-
-  const url = authUrl.toString();
+  const url = buildAuthUrl(cfg.clientId, stateParam, port);
   oauthState = { server, port, stateParam, authUrl: url, resolved: false, cfg };
 
-  openBrowser(url);
+  openBrowser(`http://127.0.0.1:${port}/open`);
 
   return { url, shortUrl: `http://127.0.0.1:${port}/open`, port };
 }
