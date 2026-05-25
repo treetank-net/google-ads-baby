@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" pre-tool \"${CLAUDE_PLUGIN_DATA}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" pre-tool"
           }
         ]
       }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit \"${CLAUDE_PLUGIN_DATA}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit"
           }
         ]
       }

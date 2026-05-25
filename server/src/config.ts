@@ -35,8 +35,8 @@ function env(name: string): string {
 }
 
 export function getConfigDir(): string {
-  const pluginData = process.env['CLAUDE_PLUGIN_DATA'];
-  if (isValidEnv(pluginData)) return pluginData;
+  const explicit = env('GOOGLE_ADS_BABY_DATA');
+  if (explicit) return explicit;
   const home = process.env['HOME'] || process.env['USERPROFILE'] || process.env['APPDATA'];
   if (home) return join(home, '.google-ads-baby');
   return join(process.platform === 'win32' ? (process.env['TEMP'] || 'C:\\Temp') : '/tmp', '.google-ads-baby');

@@ -20,7 +20,6 @@ function validArg(v) {
 
 const stateDir = validArg(process.argv[3])
   || validEnv('GOOGLE_ADS_BABY_DATA')
-  || validEnv('CLAUDE_PLUGIN_DATA')
   || join(homedir() || tmpdir(), '.google-ads-baby');
 mkdirSync(stateDir, { recursive: true });
 
