@@ -86,6 +86,43 @@ export async function createKeywords(
   }) as any));
 }
 
+export async function mutateKeywordStatus(
+  cfg: AdsConfig,
+  customerId: string,
+  operations: Array<{ adGroupId: string; criterionId: string; status: 'ENABLED' | 'PAUSED' | 'REMOVED' }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const updates = operations.filter(op => op.status !== 'REMOVED');
+  const removes = operations.filter(op => op.status === 'REMOVED');
+  const results: unknown[] = [];
+  if (updates.length) {
+    results.push(await customer.adGroupCriteria.update(updates.map(op => ({
+      resource_name: `customers/${customerId}/adGroupCriteria/${op.adGroupId}~${op.criterionId}`,
+      status: enums.AdGroupCriterionStatus[op.status],
+    }))));
+  }
+  if (removes.length) {
+    results.push(await customer.adGroupCriteria.remove(
+      removes.map(op => `customers/${customerId}/adGroupCriteria/${op.adGroupId}~${op.criterionId}`),
+    ));
+  }
+  return results.length === 1 ? results[0] : results;
+}
+
+export async function mutateAdStatus(
+  cfg: AdsConfig,
+  customerId: string,
+  adGroupId: string,
+  adId: string,
+  status: 'ENABLED' | 'PAUSED',
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.adGroupAds.update([{
+    resource_name: `customers/${customerId}/adGroupAds/${adGroupId}~${adId}`,
+    status: enums.AdGroupAdStatus[status],
+  }]);
+}
+
 export async function createNegativeKeywords(
   cfg: AdsConfig,
   customerId: string,

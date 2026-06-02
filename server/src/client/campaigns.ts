@@ -245,6 +245,86 @@ export async function createCampaignTargeting(
   ]);
 }
 
+export async function updateDemographicBidModifiers(
+  cfg: AdsConfig,
+  customerId: string,
+  level: 'campaign' | 'ad_group',
+  targetId: string,
+  modifiers: Array<{ criterionId: string; bidModifier: number }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const prefix = level === 'campaign' ? 'campaignCriteria' : 'adGroupCriteria';
+  const entity = level === 'campaign' ? 'campaign_criterion' : 'ad_group_criterion';
+  return customer.mutateResources(modifiers.map(m => ({
+    entity,
+    operation: 'update',
+    resource: {
+      resource_name: `customers/${customerId}/${prefix}/${targetId}~${m.criterionId}`,
+      bid_modifier: m.bidModifier,
+    },
+  })) as any);
+}
+
+export async function updateCampaignConversionGoals(
+  cfg: AdsConfig,
+  customerId: string,
+  goals: Array<{ resourceName: string; biddable: boolean }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources(goals.map(g => ({
+    entity: 'campaign_conversion_goal',
+    operation: 'update',
+    resource: {
+      resource_name: g.resourceName,
+      biddable: g.biddable,
+    },
+  })) as any);
+}
+
+export async function linkCampaignSharedSet(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  sharedSetId: string,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources([{
+    entity: 'campaign_shared_set',
+    operation: 'create',
+    resource: {
+      campaign: ResourceNames.campaign(customerId, campaignId),
+      shared_set: `customers/${customerId}/sharedSets/${sharedSetId}`,
+    },
+  }] as any);
+}
+
+export async function createAdSchedules(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  schedules: Array<{
+    dayOfWeek: string;
+    startHour: number;
+    startMinute: string;
+    endHour: number;
+    endMinute: string;
+    bidModifier: number;
+  }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.campaignCriteria.create(schedules.map(s => ({
+    campaign: ResourceNames.campaign(customerId, campaignId),
+    ad_schedule: {
+      day_of_week: (enums.DayOfWeek as any)[s.dayOfWeek],
+      start_hour: s.startHour,
+      start_minute: (enums.MinuteOfHour as any)[s.startMinute],
+      end_hour: s.endHour,
+      end_minute: (enums.MinuteOfHour as any)[s.endMinute],
+    },
+    bid_modifier: s.bidModifier,
+  }) as any));
+}
+
 export async function mutateBiddingStrategy(
   cfg: AdsConfig,
   customerId: string,

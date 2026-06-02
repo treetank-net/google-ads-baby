@@ -9,6 +9,10 @@ export const MAX_ASSET_GROUP_ASSETS_PER_MUTATION = 100;
 export const MAX_CAMPAIGN_ASSETS_PER_MUTATION = 20;
 export const MAX_ASSET_GROUP_SIGNALS_PER_MUTATION = 20;
 export const MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION = 20;
+export const MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION = 20;
+export const MAX_CONVERSION_GOALS_PER_MUTATION = 50;
+export const MAX_AD_SCHEDULES_PER_MUTATION = 42;
+export const MAX_BID_MODIFIER = 5.0;
 export const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 export const safeWordSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');

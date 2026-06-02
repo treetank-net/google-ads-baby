@@ -25,8 +25,8 @@ client.ts                 — barrel re-export z client/
 
 client/
   core.ts                 — getCustomer(), listAccounts(), getCampaigns(), executeGaql()
-  campaigns.ts            — campaign CRUD, ad group create, targeting, bidding
-  ads.ts                  — responsive search/display ad, keywords, negative keywords
+  campaigns.ts            — campaign CRUD, ad group create, targeting, bidding, demographics, conversion goals, shared sets, ad schedules
+  ads.ts                  — responsive search/display ad, keywords, negative keywords, keyword/ad status changes
   assets.ts               — asset groups, extensions, sitelinks, callouts, image upload, linking
   index.ts                — barrel re-export
 
@@ -40,9 +40,9 @@ tools/
   write-schemas.ts        — Zod schemas, safety constants (budget caps, limits)
   write-helpers.ts        — validation, image inspection, preview formatting
   write-executor.ts       — executeMutation() dispatcher, formatMutationError()
-  write-prepare-campaigns.ts — prepare_campaign_status, prepare_budget_change, prepare_search/display/pmax_campaign, etc.
+  write-prepare-campaigns.ts — prepare_campaign_status, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
   write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
-  write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords
+  write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status
   write-confirm.ts        — get_safety_setup, confirm_safe_word, confirm_mutation, confirm_all_mutations
 ```
 
@@ -221,7 +221,13 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 
 ### Krótkoterminowe
 - [ ] Testowanie end-to-end z prawdziwym kontem Google Ads (dev token w trybie testowym)
-- [ ] Dodać `prepare_keyword_add` / `prepare_keyword_remove` — zarządzanie keywordami
+- [x] Dodać `prepare_keyword_status` — zmiana statusu keywordów (ENABLED/PAUSED/REMOVED)
+- [x] Dodać `prepare_ad_status` — zmiana statusu reklam (ENABLED/PAUSED)
+- [x] Dodać `prepare_demographic_bid_modifier` — korekty stawek wiek/płeć
+- [x] Dodać `prepare_campaign_conversion_goals` — ustawienie PRIMARY/SECONDARY konwersji per kampania
+- [x] Dodać `prepare_campaign_shared_set` — linkowanie shared negative keyword lists
+- [x] Dodać `prepare_ad_schedule` — harmonogram reklam z bid modifierami
+- [x] Fix: sitelink `final_urls` przeniesione na poziom asset (query params w URLach działają poprawnie)
 - [ ] Dodać `prepare_ad_group_status` — pauza/wznowienie ad groupów
 - [ ] Lepsze error handling w MCP server (Google Ads API errors → czytelne komunikaty po polsku)
 

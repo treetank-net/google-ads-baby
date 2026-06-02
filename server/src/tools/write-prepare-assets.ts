@@ -121,7 +121,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
         link_text: z.string().min(1).max(25).describe('Sitelink text shown in the ad, max 25 chars'),
         description1: z.string().max(35).default('').describe('First description line, max 35 chars'),
         description2: z.string().max(35).default('').describe('Second description line, max 35 chars'),
-        final_url: z.string().min(1).describe('Landing page URL for this sitelink'),
+        final_url: z.string().url().describe('Landing page URL for this sitelink'),
       })).min(1).max(20).describe('Sitelinks to create'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
     },

@@ -134,7 +134,8 @@ export async function createCampaignExtensions(
         resource_name: assetResource,
         name: s.linkText,
         type: enums.AssetType.SITELINK,
-        sitelink_asset: { link_text: s.linkText, description1: s.description1, description2: s.description2, final_urls: [s.finalUrl] },
+        final_urls: [s.finalUrl],
+        sitelink_asset: { link_text: s.linkText, description1: s.description1, description2: s.description2 },
       },
     });
     ops.push({
@@ -224,11 +225,11 @@ export async function createSitelinkAssets(
   return customer.assets.create(sitelinks.map((s) => ({
     name: s.linkText,
     type: enums.AssetType.SITELINK,
+    final_urls: [s.finalUrl],
     sitelink_asset: {
       link_text: s.linkText,
       description1: s.description1,
       description2: s.description2,
-      final_urls: [s.finalUrl],
     },
   })) as any);
 }

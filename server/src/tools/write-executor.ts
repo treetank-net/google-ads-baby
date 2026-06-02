@@ -2,6 +2,7 @@ import type { AdsConfig } from '../config.js';
 import type { PendingMutation } from '../confirm.js';
 import {
   createAdGroup,
+  createAdSchedules,
   createAssetGroup,
   createAssetGroupAssets,
   createAssetGroupListingGroupFilters,
@@ -22,10 +23,15 @@ import {
   createStructuredSnippetAssets,
   linkAdGroupAssets,
   linkCampaignAssets,
+  linkCampaignSharedSet,
+  mutateAdStatus,
   mutateBiddingStrategy,
   mutateCampaignBudget,
   mutateCampaignStatus,
+  mutateKeywordStatus,
   removeCampaigns,
+  updateCampaignConversionGoals,
+  updateDemographicBidModifiers,
   uploadImageAssetFromFile,
   uploadImageAssetFromUrl,
 } from '../client.js';
@@ -40,6 +46,15 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
     if (result) return `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}`;
     return `OK: ${mutation.preview} — done.`;
   };
+
+  if (mutation.action === 'keyword_status') {
+    return ok(await mutateKeywordStatus(cfg, p.customer_id,
+      p.keywords.map((kw: any) => ({ adGroupId: p.ad_group_id, criterionId: kw.criterion_id, status: kw.new_status }))));
+  }
+
+  if (mutation.action === 'ad_status') {
+    return ok(await mutateAdStatus(cfg, p.customer_id, p.ad_group_id, p.ad_id, p.new_status));
+  }
 
   if (mutation.action === 'campaign_status') {
     await mutateCampaignStatus(cfg, p.customer_id, p.campaign_id, p.new_status);
@@ -145,6 +160,32 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   if (mutation.action === 'callout_assets_create') return ok(await createCalloutAssets(cfg, p.customer_id, p.callouts));
   if (mutation.action === 'call_asset_create') return ok(await createCallAsset(cfg, p.customer_id, p.country_code, p.phone_number));
   if (mutation.action === 'structured_snippet_assets_create') return ok(await createStructuredSnippetAssets(cfg, p.customer_id, p.header, p.values));
+
+  if (mutation.action === 'demographic_bid_modifier') {
+    return ok(await updateDemographicBidModifiers(cfg, p.customer_id, p.level, p.target_id,
+      p.modifiers.map((m: any) => ({ criterionId: m.criterion_id, bidModifier: m.bid_modifier }))));
+  }
+
+  if (mutation.action === 'campaign_conversion_goals') {
+    return ok(await updateCampaignConversionGoals(cfg, p.customer_id,
+      p.goals.map((g: any) => ({ resourceName: g.resource_name, biddable: g.biddable }))));
+  }
+
+  if (mutation.action === 'campaign_shared_set_link') {
+    return ok(await linkCampaignSharedSet(cfg, p.customer_id, p.campaign_id, p.shared_set_id));
+  }
+
+  if (mutation.action === 'ad_schedule_create') {
+    return ok(await createAdSchedules(cfg, p.customer_id, p.campaign_id,
+      p.schedules.map((s: any) => ({
+        dayOfWeek: s.day_of_week,
+        startHour: s.start_hour,
+        startMinute: s.start_minute,
+        endHour: s.end_hour,
+        endMinute: s.end_minute,
+        bidModifier: s.bid_modifier,
+      }))));
+  }
 
   if (mutation.action === 'bidding_strategy_change') {
     return ok(await mutateBiddingStrategy(cfg, p.customer_id, p.campaign_id, {

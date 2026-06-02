@@ -310,6 +310,75 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
   );
 
   server.tool(
+    'prepare_keyword_status',
+    'Prepare status change (enable/pause/remove) for existing keywords in an ad group. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_group_id: z.string().describe('Ad group ID containing the keywords'),
+      keywords: z.array(z.object({
+        criterion_id: z.string().describe('Keyword criterion ID (from execute_gaql or list_ads_entities)'),
+        label: z.string().describe('Keyword text for preview, e.g. "BROAD: transport services"'),
+        new_status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']).describe('Target status'),
+      })).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to update'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, ad_group_id, keywords, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+      const normalizedKeywords = keywords.map(kw => ({
+        criterion_id: normalizeResourceId(kw.criterion_id),
+        label: kw.label,
+        new_status: kw.new_status,
+      }));
+      const uniqueIds = new Set(normalizedKeywords.map(kw => kw.criterion_id));
+      if (uniqueIds.size !== normalizedKeywords.length) {
+        return validationResult('Duplicate criterion_id in the request.');
+      }
+      const preview = [
+        `Update ${normalizedKeywords.length} keyword status(es) in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`,
+        ...normalizedKeywords.map(kw => `- ${kw.new_status}: ${kw.label} (criterion ${kw.criterion_id})`),
+      ].join('\n');
+      const mutation = createToken('keyword_status', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: normalizedAdGroupId,
+        keywords: normalizedKeywords,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_ad_status',
+    'Prepare status change (enable/pause) for an existing ad. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_group_id: z.string().describe('Ad group ID containing the ad'),
+      ad_id: z.string().describe('Ad ID (from execute_gaql or list_ads_entities)'),
+      ad_name: z.string().describe('Ad description for preview, e.g. "RSA: Transport | Logistics | ..."'),
+      new_status: z.enum(['ENABLED', 'PAUSED']).describe('Target status'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, ad_group_id, ad_id, ad_name, new_status, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+      const normalizedAdId = normalizeResourceId(ad_id);
+      const action = new_status === 'ENABLED' ? 'Enable' : 'Pause';
+      const preview = `${action} ad "${ad_name}" (ID: ${normalizedAdId}) in ad group ${normalizedAdGroupId}, account ${normalizedCustomerId}`;
+      const mutation = createToken('ad_status', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: normalizedAdGroupId,
+        ad_id: normalizedAdId,
+        new_status,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_negative_keywords',
     'Prepare creation of negative keywords at campaign or ad group level. Returns a preview and confirmation token.',
     {

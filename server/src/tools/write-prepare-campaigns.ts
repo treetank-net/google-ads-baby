@@ -7,6 +7,10 @@ import {
   MAX_BUDGET_MICROS,
   MAX_CPC_MICROS,
   MAX_TARGETING_CRITERIA_PER_MUTATION,
+  MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION,
+  MAX_CONVERSION_GOALS_PER_MUTATION,
+  MAX_AD_SCHEDULES_PER_MUTATION,
+  MAX_BID_MODIFIER,
   safeWordSchema,
   campaignRefSchema,
   criterionIdListSchema,
@@ -337,6 +341,169 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
   );
 
   server.tool(
+    'prepare_demographic_bid_modifier',
+    'Prepare setting bid modifiers for demographic criteria (age range / gender) on a campaign or ad group. Use execute_gaql first to get criterion IDs. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      level: z.enum(['campaign', 'ad_group']).describe('Level to set bid modifiers on'),
+      campaign_id: z.string().optional().describe('Campaign ID, required when level=campaign'),
+      ad_group_id: z.string().optional().describe('Ad group ID, required when level=ad_group'),
+      modifiers: z.array(z.object({
+        criterion_id: z.string().describe('Criterion ID for the demographic (from GAQL: ad_group_criterion.criterion_id or campaign_criterion.criterion_id)'),
+        label: z.string().describe('Human-readable label for preview, e.g. "AGE_RANGE_65_UP" or "FEMALE"'),
+        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).describe('Bid modifier multiplier: 0.0 to exclude, 1.0 = no change, 1.5 = +50%, 0.5 = -50%'),
+      })).min(1).max(MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION).describe('Demographic bid modifiers to set'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, level, campaign_id, ad_group_id, modifiers, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      if (level === 'campaign' && !campaign_id) return validationResult('campaign_id is required when level=campaign.');
+      if (level === 'ad_group' && !ad_group_id) return validationResult('ad_group_id is required when level=ad_group.');
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const targetId = level === 'campaign'
+        ? normalizeResourceId(campaign_id!)
+        : normalizeResourceId(ad_group_id!);
+      const normalizedModifiers = modifiers.map(m => ({
+        criterion_id: normalizeResourceId(m.criterion_id),
+        label: m.label,
+        bid_modifier: m.bid_modifier,
+      }));
+      const uniqueIds = new Set(normalizedModifiers.map(m => m.criterion_id));
+      if (uniqueIds.size !== normalizedModifiers.length) {
+        return validationResult('Duplicate criterion_id in modifiers.');
+      }
+      const preview = [
+        `Set ${normalizedModifiers.length} demographic bid modifier(s) on ${level} ${targetId}, account ${normalizedCustomerId}`,
+        ...normalizedModifiers.map(m => {
+          const pct = m.bid_modifier === 0 ? 'EXCLUDE' : `${((m.bid_modifier - 1) * 100).toFixed(0)}%`;
+          return `- ${m.label} (criterion ${m.criterion_id}): ${m.bid_modifier}x (${pct})`;
+        }),
+      ].join('\n');
+      const mutation = createToken('demographic_bid_modifier', {
+        customer_id: normalizedCustomerId,
+        level,
+        target_id: targetId,
+        modifiers: normalizedModifiers,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_campaign_conversion_goals',
+    'Prepare updating which conversion goals are primary (biddable) for a campaign. Use execute_gaql first to list campaign_conversion_goal resources. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Campaign ID (for preview)'),
+      goals: z.array(z.object({
+        resource_name: z.string().describe('Full campaign_conversion_goal resource name, e.g. customers/123/campaignConversionGoals/456~PURCHASE~WEBSITE'),
+        biddable: z.boolean().describe('true = PRIMARY (Smart Bidding optimizes for this), false = SECONDARY (tracked but not optimized)'),
+        label: z.string().describe('Human-readable label for preview, e.g. "PURCHASE / WEBSITE"'),
+      })).min(1).max(MAX_CONVERSION_GOALS_PER_MUTATION).describe('Conversion goals to update'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, campaign_id, goals, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const uniqueNames = new Set(goals.map(g => g.resource_name));
+      if (uniqueNames.size !== goals.length) {
+        return validationResult('Duplicate resource_name in goals.');
+      }
+      const primary = goals.filter(g => g.biddable);
+      const secondary = goals.filter(g => !g.biddable);
+      const preview = [
+        `Update conversion goals for campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
+        ...(primary.length ? [`PRIMARY (${primary.length}): ${primary.map(g => g.label).join(', ')}`] : []),
+        ...(secondary.length ? [`SECONDARY (${secondary.length}): ${secondary.map(g => g.label).join(', ')}`] : []),
+      ].join('\n');
+      const mutation = createToken('campaign_conversion_goals', {
+        customer_id: normalizedCustomerId,
+        goals: goals.map(g => ({ resource_name: g.resource_name, biddable: g.biddable })),
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_campaign_shared_set',
+    'Prepare linking an existing shared set (e.g. negative keyword list) to a campaign. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Campaign ID to link the shared set to'),
+      campaign_name: z.string().describe('Campaign name (for preview)'),
+      shared_set_id: z.string().describe('Shared set ID (from execute_gaql on shared_set resource)'),
+      shared_set_name: z.string().describe('Shared set name (for preview)'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, campaign_id, campaign_name, shared_set_id, shared_set_name, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const normalizedSharedSetId = normalizeResourceId(shared_set_id);
+      const preview = `Link shared set "${shared_set_name}" (ID: ${normalizedSharedSetId}) to campaign "${campaign_name}" (ID: ${normalizedCampaignId}), account ${normalizedCustomerId}`;
+      const mutation = createToken('campaign_shared_set_link', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        shared_set_id: normalizedSharedSetId,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_ad_schedule',
+    'Prepare creating ad schedule criteria (dayparting) with optional bid modifiers for a campaign. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Campaign ID'),
+      schedules: z.array(z.object({
+        day_of_week: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).describe('Day of week'),
+        start_hour: z.number().int().min(0).max(23).describe('Start hour (0-23)'),
+        start_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO').describe('Start minute'),
+        end_hour: z.number().int().min(1).max(24).describe('End hour (1-24, where 24 means midnight)'),
+        end_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO').describe('End minute'),
+        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).default(1.0).describe('Bid modifier: 1.0 = no change, 1.5 = +50%'),
+      })).min(1).max(MAX_AD_SCHEDULES_PER_MUTATION).describe('Ad schedule entries'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+    },
+    async ({ customer_id, campaign_id, schedules, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      for (const s of schedules) {
+        if (s.end_hour < s.start_hour || (s.end_hour === s.start_hour && s.end_minute === 'ZERO' && s.start_minute !== 'ZERO')) {
+          return validationResult(`Invalid schedule: ${s.day_of_week} ${s.start_hour}:${s.start_minute} - ${s.end_hour}:${s.end_minute}. End must be after start.`);
+        }
+      }
+      const preview = [
+        `Create ${schedules.length} ad schedule(s) for campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
+        ...schedules.map(s => {
+          const pct = s.bid_modifier === 1.0 ? 'no change' : `${((s.bid_modifier - 1) * 100).toFixed(0)}%`;
+          return `- ${s.day_of_week} ${s.start_hour}:${s.start_minute.replace('ZERO', '00').replace('FIFTEEN', '15').replace('THIRTY', '30').replace('FORTY_FIVE', '45')}-${s.end_hour}:${s.end_minute.replace('ZERO', '00').replace('FIFTEEN', '15').replace('THIRTY', '30').replace('FORTY_FIVE', '45')} (bid: ${s.bid_modifier}x / ${pct})`;
+        }),
+      ].join('\n');
+      const mutation = createToken('ad_schedule_create', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        schedules: schedules.map(s => ({
+          day_of_week: s.day_of_week,
+          start_hour: s.start_hour,
+          start_minute: s.start_minute,
+          end_hour: s.end_hour,
+          end_minute: s.end_minute,
+          bid_modifier: s.bid_modifier,
+        })),
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_campaign_extensions',
     'Prepare batch creation of campaign extensions (sitelinks, callouts, call, structured snippets) AND link them to a campaign in one atomic operation. Can also link existing assets (images, logos). Single confirmation for everything.',
     {
@@ -346,7 +513,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         link_text: z.string().min(1).max(25),
         description1: z.string().max(35).default(''),
         description2: z.string().max(35).default(''),
-        final_url: z.string().min(1),
+        final_url: z.string().url(),
       })).max(20).default([]).describe('Sitelinks to create and link'),
       callouts: z.array(z.string().min(1).max(25)).max(20).default([]).describe('Callout texts to create and link'),
       call: z.object({
