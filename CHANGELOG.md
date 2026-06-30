@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.13.0
+
+### Added
+- **Marketing-knowledge store (interim)** — the plugin now wires a second MCP server, `marketing-knowledge`, backed by `@movibe/memory-bank-mcp` (pinned to `0.4.1`). It accumulates marketing know-how across sessions as plain, human-editable **markdown files** — separating general/cross-client knowledge from per-client notes. Point `MARKETING_KNOWLEDGE_DIR` at a folder inside your Google Drive / OneDrive sync to get cross-machine + team sharing without OAuth (the desktop sync client handles it). This is an interim adoption of an off-the-shelf Node server; the planned next step is domain wiring (auto-recording confirmed mutations into a per-client decision log via the safety hook).
+
 ## v0.12.0
 
 ### Added

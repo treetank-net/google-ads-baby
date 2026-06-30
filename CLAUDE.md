@@ -88,6 +88,13 @@ tools/
 - Codex marketplace: `.agents/plugins/marketplace.json` points to `./plugins/google-ads-baby`; the wrapper uses `npx @treetank/google-ads-baby` for MCP and hook commands
 - Codex hook runtime currently may not activate plugin-local hooks; standalone hook package lives at `hooks/google-ads-baby-safety/hooks.json`
 
+### Marketing-knowledge server (interim — `marketing-knowledge`)
+A second MCP server wired next to `google-ads` in every MCP manifest (`.claude-plugin/plugin.json` + both `.mcp.json`). **Purpose:** a persistent marketing knowledge base that accumulates across sessions (Claude Desktop has no memory) — client profiles, a decision log, "what works" learnings, general vs per-client knowledge. Stored as **plain, human-editable markdown**.
+- Backend: `@movibe/memory-bank-mcp` (Node/npx, MIT, **pinned `0.4.1`**) — an off-the-shelf server, deliberately adopted instead of writing our own.
+- Sync **without OAuth**: `MARKETING_KNOWLEDGE_DIR` points at a folder inside Google Drive / OneDrive desktop sync; the sync client handles cloud + team sharing. The plugin only does local file I/O.
+- **Status: interim.** Conscious trade-offs vs the rest of the family: (a) `npx` = npm cold-start (not bundled like the `google-ads` bundle.cjs), (b) memory-bank's taxonomy is software-dev shaped (`product-context`/`active-context`/`progress`/`decision-log`/`system-patterns`) — we repurpose it for marketing, (c) no full-text search.
+- **Planned next step (not done yet):** domain wiring — a `confirm_mutation` hook that auto-appends confirmed mutations to a per-client decision log; possibly our own lightweight family-style server if the interim proves out.
+
 ### Two-Phase Mutation Flow
 1. LLM invents a short random ASCII safe word and calls `prepare_*` with `safe_word`
 2. LLM shows preview + safe word to user, asks for confirmation using that word

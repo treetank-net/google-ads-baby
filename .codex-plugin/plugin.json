@@ -1,7 +1,7 @@
 {
   "name": "google-ads-baby",
-  "version": "0.12.0",
-  "description": "Google Ads campaign management MCP server with two-phase safety confirmations.",
+  "version": "0.13.0",
+  "description": "Google Ads campaign management MCP server with two-phase safety confirmations, plus an interim marketing-knowledge store.",
   "author": {
     "name": "Jacek Mariański",
     "url": "https://treetank.net"
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "Google Ads Baby",
     "shortDescription": "Manage Google Ads campaigns through a safe local MCP server.",
-    "longDescription": "Google Ads MCP server for listing accounts and campaigns, adjusting budgets, changing campaign status, and preparing new Search campaigns, ad groups, and responsive search ads with two-phase safety confirmation.",
+    "longDescription": "Google Ads MCP server for listing accounts and campaigns, adjusting budgets, changing campaign status, and preparing new Search campaigns, ad groups, and responsive search ads with two-phase safety confirmation. Also wires an interim marketing-knowledge store (memory-bank-mcp) for accumulating per-client and general marketing notes across sessions as plain markdown — point MARKETING_KNOWLEDGE_DIR at a Google Drive / OneDrive-synced folder.",
     "developerName": "Jacek Mariański",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],

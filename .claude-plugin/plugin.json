@@ -1,14 +1,14 @@
 {
   "name": "google-ads-baby",
   "description": "Google Ads campaign management MCP server with two-phase safety confirmations. Read campaigns, adjust budgets, pause/enable — every mutation requires explicit user approval. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "author": {
     "name": "Jacek Mariański",
     "email": "jmarianski@trans.eu",
     "url": "https://treetank.net"
   },
   "license": "MIT",
-  "keywords": ["google-ads", "mcp", "campaigns", "safety"],
+  "keywords": ["google-ads", "mcp", "campaigns", "safety", "knowledge", "memory"],
   "hooks": "./hooks.json",
   "mcpServers": {
     "google-ads": {
@@ -25,6 +25,13 @@
         "GOOGLE_ADS_ENABLE_MANUAL_CONFIRM": "${GOOGLE_ADS_ENABLE_MANUAL_CONFIRM:-0}",
         "GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS": "${GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS:-}",
         "GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS": "${GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS:-}"
+      }
+    },
+    "marketing-knowledge": {
+      "command": "npx",
+      "args": ["-y", "@movibe/memory-bank-mcp@0.4.1", "--path", "${MARKETING_KNOWLEDGE_DIR}"],
+      "env": {
+        "MARKETING_KNOWLEDGE_DIR": "${MARKETING_KNOWLEDGE_DIR:-}"
       }
     }
   }
