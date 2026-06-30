@@ -3,7 +3,7 @@
   "version": "0.12.0",
   "description": "Google Ads campaign management MCP server with two-phase safety confirmations.",
   "author": {
-    "name": "Jacek Marianski",
+    "name": "Jacek Mariański",
     "url": "https://treetank.net"
   },
   "license": "MIT",
@@ -14,7 +14,7 @@
     "displayName": "Google Ads Baby",
     "shortDescription": "Manage Google Ads campaigns through a safe local MCP server.",
     "longDescription": "Google Ads MCP server for listing accounts and campaigns, adjusting budgets, changing campaign status, and preparing new Search campaigns, ad groups, and responsive search ads with two-phase safety confirmation.",
-    "developerName": "Jacek Marianski",
+    "developerName": "Jacek Mariański",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [

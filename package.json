@@ -3,7 +3,7 @@
   "version": "0.12.0",
   "type": "module",
   "description": "Google Ads MCP server with two-phase safety confirmations.",
-  "author": "Jacek Marianski <jmarianski@trans.eu>",
+  "author": "Jacek Mariański <jmarianski@trans.eu>",
   "license": "MIT",
   "repository": {
     "type": "git",
