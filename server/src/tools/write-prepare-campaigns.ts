@@ -10,11 +10,17 @@ import {
   MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION,
   MAX_CONVERSION_GOALS_PER_MUTATION,
   MAX_AD_SCHEDULES_PER_MUTATION,
+  MAX_AD_GROUP_CRITERIA_PER_MUTATION,
+  MAX_NEGATIVE_TOPICS_PER_MUTATION,
   MAX_BID_MODIFIER,
+  MAX_KEYWORDS_PER_MUTATION,
   safeWordSchema,
+  keywordMatchTypeSchema,
   campaignRefSchema,
   criterionIdListSchema,
   campaignAssetFieldTypeSchema,
+  adGroupCriterionResourceNameSchema,
+  negativeTopicSchema,
 } from './write-schemas.js';
 import {
   validationResult,
@@ -24,6 +30,14 @@ import {
   loadImageAssetInfo,
   validateAssetPlacement,
 } from './write-helpers.js';
+import {
+  buildSearchCampaignPayload,
+  formatSearchCampaignPreview,
+  buildDisplayCampaignPayload,
+  formatDisplayCampaignPreview,
+  buildPerformanceMaxPayload,
+  formatPmaxCampaignPreview,
+} from './presets.js';
 
 export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
@@ -135,6 +149,235 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
   );
 
   server.tool(
+    'prepare_search_campaign_full',
+    'Prepare a COMPLETE Search campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad groups (each with keywords and a responsive search ad) + extensions (sitelinks/callouts/call). Optionally driven by a preset that fills sane defaults. Returns a SINGLE preview and ONE confirmation token — the user confirms once for the whole campaign. Prefer this over calling prepare_search_campaign + prepare_ad_group + prepare_keywords + ... separately; it is far faster (one model turn, one atomic API transaction, one confirm).',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      preset: z.enum(['ecommerce-search-pl', 'leadgen-search-pl', 'none']).optional().describe('Preset filling defaults: match types (exact+phrase), bidding, geo PL (2616), language PL (1045). Omit/"none" for manual MANUAL_CPC with no targeting defaults.'),
+      campaign_name: z.string().min(1).describe('New campaign name'),
+      daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+      final_url: z.string().url().describe('Default final URL for ads and sitelinks'),
+      ad_groups: z.array(z.object({
+        name: z.string().min(1).describe('Ad group name'),
+        cpc_bid_pln: z.number().positive().optional().describe('CPC bid in PLN; defaults to 1 PLN'),
+        final_url: z.string().url().optional().describe('Overrides campaign final_url for this ad group'),
+        keywords: z.array(z.object({
+          text: z.string().min(1).max(80),
+          match_type: keywordMatchTypeSchema.optional().describe('Omit to expand per preset (default exact+phrase)'),
+        })).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords; without match_type each is expanded to exact+phrase'),
+        headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('RSA headlines: 3-15, max 30 chars each'),
+        descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('RSA descriptions: 2-4, max 90 chars each'),
+      })).min(1).max(20).describe('Ad groups; each gets its keywords and one responsive search ad'),
+      location_criterion_ids: z.array(z.string().regex(/^\d+$/, 'Geo target constant IDs must be numeric')).optional().describe('Geo target constant IDs; defaults from preset (PL=2616)'),
+      language_criterion_ids: z.array(z.string().regex(/^\d+$/, 'Language constant IDs must be numeric')).optional().describe('Language constant IDs; defaults from preset (Polish=1045)'),
+      positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('Default PRESENCE (recommended for local intent)'),
+      bidding: z.object({
+        type: z.enum(['MANUAL_CPC', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'TARGET_CPA', 'TARGET_ROAS']),
+        target_cpa_pln: z.number().positive().optional().describe('Required for TARGET_CPA; optional tCPA for MAXIMIZE_CONVERSIONS'),
+        target_roas: z.number().positive().max(50).optional().describe('Multiplier, e.g. 4.0 = 400% (NOT a percent). Required for TARGET_ROAS.'),
+      }).optional().describe('Overrides preset bidding'),
+      campaign_negative_keywords: z.array(z.object({
+        text: z.string().min(1).max(80),
+        match_type: keywordMatchTypeSchema.optional().describe('Defaults to PHRASE'),
+      })).max(MAX_KEYWORDS_PER_MUTATION).optional().describe('Campaign-level negative keywords'),
+      sitelinks: z.array(z.object({
+        link_text: z.string().min(1).max(25),
+        description1: z.string().max(35).optional(),
+        description2: z.string().max(35).optional(),
+        final_url: z.string().url().optional().describe('Defaults to campaign final_url'),
+      })).max(20).optional(),
+      callouts: z.array(z.string().min(1).max(25)).max(20).optional(),
+      call: z.object({
+        country_code: z.string().describe('ISO country code, e.g. PL'),
+        phone_number: z.string().describe('Phone number'),
+      }).optional(),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async (args) => {
+      const customerError = validateCustomer(args.customer_id);
+      if (customerError) return customerError;
+      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
+      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
+        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
+      }
+      const normalizedCustomerId = normalizeCustomerId(args.customer_id);
+
+      const payload = buildSearchCampaignPayload({
+        preset: args.preset,
+        campaignName: args.campaign_name,
+        dailyBudgetMicros,
+        finalUrl: args.final_url,
+        adGroups: args.ad_groups.map((ag) => ({
+          name: ag.name,
+          cpcBidMicros: ag.cpc_bid_pln ? Math.round(ag.cpc_bid_pln * 1_000_000) : undefined,
+          finalUrl: ag.final_url,
+          keywords: ag.keywords.map((kw) => ({ text: kw.text, matchType: kw.match_type })),
+          headlines: ag.headlines,
+          descriptions: ag.descriptions,
+        })),
+        locationCriterionIds: args.location_criterion_ids,
+        languageCriterionIds: args.language_criterion_ids,
+        positiveGeoTargetType: args.positive_geo_target_type,
+        bidding: args.bidding ? {
+          type: args.bidding.type,
+          targetCpaMicros: args.bidding.target_cpa_pln ? Math.round(args.bidding.target_cpa_pln * 1_000_000) : undefined,
+          targetRoas: args.bidding.target_roas,
+        } : undefined,
+        campaignNegatives: args.campaign_negative_keywords?.map((n) => ({ text: n.text, matchType: n.match_type })),
+        sitelinks: args.sitelinks?.map((s) => ({ linkText: s.link_text, description1: s.description1, description2: s.description2, finalUrl: s.final_url })),
+        callouts: args.callouts,
+        call: args.call ? { countryCode: args.call.country_code, phoneNumber: args.call.phone_number } : undefined,
+      });
+
+      const preview = formatSearchCampaignPreview(normalizedCustomerId, payload);
+      const mutation = createToken('search_campaign_full_create', {
+        customer_id: normalizedCustomerId,
+        payload,
+      }, preview, normalizeSafeWord(args.safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_display_campaign_full',
+    'Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting (defaults PL) + ad group + one responsive display ad (using existing uploaded image asset IDs). Returns a SINGLE preview and ONE confirmation token. Prefer this over separate prepare_display_campaign + prepare_display_ad_group + prepare_responsive_display_ad calls.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID'),
+      campaign_name: z.string().min(1).describe('New campaign name'),
+      daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+      bidding: z.object({
+        type: z.enum(['MANUAL_CPC', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'TARGET_CPA', 'TARGET_ROAS']),
+        target_cpa_pln: z.number().positive().optional(),
+        target_roas: z.number().positive().max(50).optional().describe('Multiplier, e.g. 4.0 = 400%'),
+      }).optional().describe('Defaults to MANUAL_CPC'),
+      location_criterion_ids: z.array(z.string().regex(/^\d+$/)).optional().describe('Defaults to PL (2616)'),
+      language_criterion_ids: z.array(z.string().regex(/^\d+$/)).optional().describe('Defaults to Polish (1045)'),
+      positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional(),
+      ad_group: z.object({
+        name: z.string().min(1),
+        cpc_bid_pln: z.number().positive().optional().describe('Defaults to 1 PLN'),
+        optimized_targeting_enabled: z.boolean().optional(),
+      }),
+      ad: z.object({
+        business_name: z.string().min(1).max(25),
+        headlines: z.array(z.string().min(1).max(30)).min(1).max(5),
+        long_headline: z.string().min(1).max(90),
+        descriptions: z.array(z.string().min(1).max(90)).min(1).max(5),
+        final_url: z.string().url(),
+        marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('Existing image asset IDs (1.91:1)'),
+        square_marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('Existing square image asset IDs (1:1)'),
+        logo_image_asset_ids: z.array(z.string().regex(/^\d+$/)).max(5).describe('Existing logo asset IDs'),
+      }),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word; must be shown to the user'),
+    },
+    async (args) => {
+      const customerError = validateCustomer(args.customer_id);
+      if (customerError) return customerError;
+      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
+      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
+        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
+      }
+      const normalizedCustomerId = normalizeCustomerId(args.customer_id);
+
+      const payload = buildDisplayCampaignPayload({
+        campaignName: args.campaign_name,
+        dailyBudgetMicros,
+        bidding: args.bidding ? {
+          type: args.bidding.type,
+          targetCpaMicros: args.bidding.target_cpa_pln ? Math.round(args.bidding.target_cpa_pln * 1_000_000) : undefined,
+          targetRoas: args.bidding.target_roas,
+        } : undefined,
+        locationCriterionIds: args.location_criterion_ids,
+        languageCriterionIds: args.language_criterion_ids,
+        positiveGeoTargetType: args.positive_geo_target_type,
+        adGroup: {
+          name: args.ad_group.name,
+          cpcBidMicros: args.ad_group.cpc_bid_pln ? Math.round(args.ad_group.cpc_bid_pln * 1_000_000) : undefined,
+          optimizedTargetingEnabled: args.ad_group.optimized_targeting_enabled,
+        },
+        ad: {
+          businessName: args.ad.business_name,
+          headlines: args.ad.headlines,
+          longHeadline: args.ad.long_headline,
+          descriptions: args.ad.descriptions,
+          finalUrl: args.ad.final_url,
+          marketingImageAssetIds: args.ad.marketing_image_asset_ids,
+          squareMarketingImageAssetIds: args.ad.square_marketing_image_asset_ids,
+          logoImageAssetIds: args.ad.logo_image_asset_ids,
+        },
+      });
+
+      const preview = formatDisplayCampaignPreview(normalizedCustomerId, payload);
+      const mutation = createToken('display_campaign_full_create', {
+        customer_id: normalizedCustomerId,
+        payload,
+      }, preview, normalizeSafeWord(args.safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_performance_max_campaign_full',
+    'Prepare a COMPLETE Performance Max campaign in ONE atomic operation: budget + campaign (AI asset enhancements OFF by default) + asset group + inline text assets (headlines/long headlines/descriptions/business name) + linked existing image assets + optional audience signals. Returns a SINGLE preview and ONE confirmation token. Builds an asset-based PMax (no Merchant feed / listing groups).',
+    {
+      customer_id: z.string().describe('Google Ads customer ID'),
+      campaign_name: z.string().min(1).describe('New campaign name'),
+      daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
+      target_roas: z.number().positive().max(50).optional().describe('Optional tROAS multiplier, e.g. 4.0 = 400% (NOT a percent)'),
+      opt_out_ai_enhancements: z.boolean().optional().describe('Default true: opt out of text + final URL expansion automation'),
+      asset_group_name: z.string().min(1),
+      final_urls: z.array(z.string().url()).min(1),
+      business_name: z.string().min(1).max(25).optional(),
+      headlines: z.array(z.string().min(1).max(30)).min(3).max(15),
+      long_headlines: z.array(z.string().min(1).max(90)).min(1).max(5),
+      descriptions: z.array(z.string().min(1).max(90)).min(2).max(5),
+      image_assets: z.array(z.object({
+        asset_id: z.string().regex(/^\d+$/),
+        field_type: z.enum(['MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'PORTRAIT_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO']),
+      })).min(1).describe('Existing image asset IDs with their field type'),
+      audience_signals: z.array(z.object({
+        type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
+        text: z.string().min(1).max(80).optional().describe('Required for SEARCH_THEME'),
+        audience_id: z.string().regex(/^\d+$/).optional().describe('Required for AUDIENCE'),
+      })).optional(),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word; must be shown to the user'),
+    },
+    async (args) => {
+      const customerError = validateCustomer(args.customer_id);
+      if (customerError) return customerError;
+      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
+      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
+        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
+      }
+      const normalizedCustomerId = normalizeCustomerId(args.customer_id);
+
+      const payload = buildPerformanceMaxPayload({
+        campaignName: args.campaign_name,
+        dailyBudgetMicros,
+        targetRoas: args.target_roas,
+        optOutAiEnhancements: args.opt_out_ai_enhancements,
+        assetGroupName: args.asset_group_name,
+        finalUrls: args.final_urls,
+        businessName: args.business_name,
+        headlines: args.headlines,
+        longHeadlines: args.long_headlines,
+        descriptions: args.descriptions,
+        imageAssets: args.image_assets.map((a) => ({ assetId: a.asset_id, fieldType: a.field_type })),
+        audienceSignals: args.audience_signals?.map((s) => s.type === 'SEARCH_THEME'
+          ? { type: 'SEARCH_THEME' as const, text: s.text ?? '' }
+          : { type: 'AUDIENCE' as const, audienceId: s.audience_id ?? '' }),
+      });
+
+      const preview = formatPmaxCampaignPreview(normalizedCustomerId, payload);
+      const mutation = createToken('performance_max_campaign_full_create', {
+        customer_id: normalizedCustomerId,
+        payload,
+      }, preview, normalizeSafeWord(args.safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
     'prepare_display_campaign',
     'Prepare creation of a paused Display campaign with a daily budget. Returns a preview and confirmation token.',
     {
@@ -241,9 +484,10 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_id: z.string().describe('Existing campaign ID'),
       ad_group_name: z.string().min(1).describe('New ad group name'),
       cpc_bid_pln: z.number().positive().describe('Max CPC bid in PLN; capped by server safety limit'),
+      optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag. Set false to keep delivery strictly within your audience selection. Omit to use the Google default.'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
     },
-    async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, safe_word }) => {
+    async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, optimized_targeting_enabled, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
       const cpcMicros = Math.round(cpc_bid_pln * 1_000_000);
@@ -252,12 +496,106 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
-      const preview = `Create paused Display ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`;
+      const optimizedTargetingLine = optimized_targeting_enabled === undefined
+        ? '(Google default)'
+        : optimized_targeting_enabled ? 'enabled' : 'disabled';
+      const preview = [
+        `Create paused Display ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`,
+        `Optimized targeting: ${optimizedTargetingLine}`,
+      ].join('\n');
       const mutation = createToken('display_ad_group_create', {
         customer_id: normalizedCustomerId,
         campaign_id: normalizedCampaignId,
         ad_group_name,
         cpc_bid_micros: cpcMicros,
+        optimized_targeting_enabled,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_ad_group_settings',
+    'Prepare updating settings on an existing ad group. Currently toggles optimized targeting (set false to stop delivery outside your audience selection). Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_group_id: z.string().describe('Existing ad group ID'),
+      optimized_targeting_enabled: z.boolean().describe('Optimized targeting flag: true to enable, false to disable'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, ad_group_id, optimized_targeting_enabled, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdGroupId = normalizeResourceId(ad_group_id);
+      const preview = [
+        `Update ad group ${normalizedAdGroupId} settings, account ${normalizedCustomerId}`,
+        `Optimized targeting: ${optimized_targeting_enabled ? 'enabled' : 'disabled'}`,
+      ].join('\n');
+      const mutation = createToken('ad_group_settings_update', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: normalizedAdGroupId,
+        optimized_targeting_enabled,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_remove_ad_group_criterion',
+    'Prepare removal of ad group criteria (e.g. display topics, placements, audiences) by full resource name. Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      resource_names: z.array(adGroupCriterionResourceNameSchema).min(1).max(MAX_AD_GROUP_CRITERIA_PER_MUTATION).describe('Ad group criterion resource names, e.g. customers/123/adGroupCriteria/456~789'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, resource_names, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const uniqueResourceNames = [...new Set(resource_names)];
+      if (uniqueResourceNames.length !== resource_names.length) {
+        return validationResult('Duplicate resource_names in the request. Remove duplicates before prepare.');
+      }
+      const preview = [
+        `Remove ${uniqueResourceNames.length} ad group criterion(s) on account ${normalizedCustomerId}:`,
+        ...uniqueResourceNames.map((name) => `- ${name}`),
+      ].join('\n');
+      const mutation = createToken('remove_ad_group_criterion', {
+        customer_id: normalizedCustomerId,
+        resource_names: uniqueResourceNames,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_negative_topics',
+    'Prepare creation of negative topic criteria at campaign level (excludes content categories from delivery). Returns a preview and confirmation token.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Campaign ID to exclude topics from'),
+      topics: z.array(negativeTopicSchema).min(1).max(MAX_NEGATIVE_TOPICS_PER_MUTATION).describe('Topic constants to exclude, e.g. ["topicConstants/1149"] or ["1149"]'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, campaign_id, topics, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const topicConstants = topics.map((topic) => topic.startsWith('topicConstants/') ? topic : `topicConstants/${topic}`);
+      const uniqueTopics = [...new Set(topicConstants)];
+      if (uniqueTopics.length !== topicConstants.length) {
+        return validationResult('Duplicate topics in the request. Remove duplicates before prepare.');
+      }
+      const preview = [
+        `Create ${uniqueTopics.length} negative topic(s) for campaign ${normalizedCampaignId}, account ${normalizedCustomerId}:`,
+        ...uniqueTopics.map((topic) => `- ${topic}`),
+      ].join('\n');
+      const mutation = createToken('negative_topics_create', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        topic_constants: uniqueTopics,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },

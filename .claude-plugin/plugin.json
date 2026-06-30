@@ -1,7 +1,7 @@
 {
   "name": "google-ads-baby",
   "description": "Google Ads campaign management MCP server with two-phase safety confirmations. Read campaigns, adjust budgets, pause/enable — every mutation requires explicit user approval. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "author": {
     "name": "Jacek Mariański",
     "email": "jmarianski@trans.eu",

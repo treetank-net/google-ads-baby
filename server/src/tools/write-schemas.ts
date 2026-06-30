@@ -12,6 +12,8 @@ export const MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION = 20;
 export const MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION = 20;
 export const MAX_CONVERSION_GOALS_PER_MUTATION = 50;
 export const MAX_AD_SCHEDULES_PER_MUTATION = 42;
+export const MAX_AD_GROUP_CRITERIA_PER_MUTATION = 100;
+export const MAX_NEGATIVE_TOPICS_PER_MUTATION = 100;
 export const MAX_BID_MODIFIER = 5.0;
 export const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 export const safeWordSchema = z.string()
@@ -126,3 +128,11 @@ export const listingGroupNodeSchema = z.object({
   parent_index: z.number().int().nonnegative().optional(),
   case_value: listingGroupCaseValueSchema.optional(),
 });
+export const adGroupCriterionResourceNameSchema = z.string().regex(
+  /^customers\/\d+\/adGroupCriteria\/\d+~\d+$/,
+  'resource_name must look like customers/{cid}/adGroupCriteria/{ag_id}~{criterion_id}',
+);
+export const negativeTopicSchema = z.string().regex(
+  /^(topicConstants\/)?\d+$/,
+  'topic must be a topic constant resource name (topicConstants/{id}) or a numeric topic ID',
+);

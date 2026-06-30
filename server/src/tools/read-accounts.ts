@@ -82,6 +82,60 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
+    'get_build_context',
+    'One-shot read of everything needed to build or extend campaigns on an account: campaigns (id/name/type/status/budget), ad groups (id/name/campaign), enabled conversion actions (needed for conversion-based bidding), and reusable image assets. Call this ONCE before creating ads instead of several separate list/query round-trips.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID'),
+    },
+    async ({ customer_id }) => {
+      const validationError = requireCustomerId(customer_id);
+      if (validationError) {
+        return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
+      }
+      try {
+        const cid = normalizeCustomerId(customer_id);
+        const [campaignRows, adGroupRows, conversionRows, assetRows] = await Promise.all([
+          executeGaql(cfg, cid, `SELECT campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status, campaign.bidding_strategy_type, campaign_budget.id, campaign_budget.amount_micros FROM campaign WHERE campaign.status IN ('ENABLED','PAUSED') ORDER BY campaign.id LIMIT 200`) as Promise<any[]>,
+          executeGaql(cfg, cid, `SELECT ad_group.id, ad_group.name, ad_group.campaign, ad_group.status FROM ad_group WHERE ad_group.status IN ('ENABLED','PAUSED') LIMIT 500`) as Promise<any[]>,
+          executeGaql(cfg, cid, `SELECT conversion_action.id, conversion_action.name, conversion_action.category, conversion_action.status FROM conversion_action WHERE conversion_action.status = 'ENABLED' LIMIT 100`) as Promise<any[]>,
+          executeGaql(cfg, cid, `SELECT asset.id, asset.name, asset.type FROM asset WHERE asset.type = 'IMAGE' LIMIT 50`) as Promise<any[]>,
+        ]);
+        const context = {
+          customer_id: cid,
+          campaigns: campaignRows.map((r) => ({
+            id: r.campaign?.id,
+            name: r.campaign?.name,
+            type: r.campaign?.advertising_channel_type,
+            status: r.campaign?.status,
+            bidding_strategy_type: r.campaign?.bidding_strategy_type,
+            budget_id: r.campaign_budget?.id,
+            budget_amount_micros: r.campaign_budget?.amount_micros,
+          })),
+          ad_groups: adGroupRows.map((r) => ({
+            id: r.ad_group?.id,
+            name: r.ad_group?.name,
+            campaign: r.ad_group?.campaign,
+            status: r.ad_group?.status,
+          })),
+          conversion_actions: conversionRows.map((r) => ({
+            id: r.conversion_action?.id,
+            name: r.conversion_action?.name,
+            category: r.conversion_action?.category,
+          })),
+          image_assets: assetRows.map((r) => ({
+            id: r.asset?.id,
+            name: r.asset?.name,
+            type: r.asset?.type,
+          })),
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(context, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: formatError(err) }] };
+      }
+    },
+  );
+
+  server.tool(
     'list_ads_entities',
     'List Google Ads entities with optional filters and relationship context. Use this instead of broad account inspection on large accounts.',
     {

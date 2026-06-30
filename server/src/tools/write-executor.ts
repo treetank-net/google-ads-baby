@@ -13,12 +13,16 @@ import {
   createCampaignTargeting,
   createDisplayAdGroup,
   createDisplayCampaign,
+  createDisplayCampaignFull,
   createKeywords,
   createNegativeKeywords,
+  createNegativeTopics,
   createPerformanceMaxCampaign,
+  createPerformanceMaxCampaignFull,
   createResponsiveDisplayAd,
   createResponsiveSearchAd,
   createSearchCampaign,
+  createSearchCampaignFull,
   createSitelinkAssets,
   createStructuredSnippetAssets,
   linkAdGroupAssets,
@@ -29,7 +33,9 @@ import {
   mutateCampaignBudget,
   mutateCampaignStatus,
   mutateKeywordStatus,
+  removeAdGroupCriteria,
   removeCampaigns,
+  updateAdGroupSettings,
   updateCampaignConversionGoals,
   updateDemographicBidModifiers,
   uploadImageAssetFromFile,
@@ -71,6 +77,9 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   }
 
   if (mutation.action === 'search_campaign_create') return ok(await createSearchCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros));
+  if (mutation.action === 'search_campaign_full_create') return ok(await createSearchCampaignFull(cfg, p.customer_id, p.payload));
+  if (mutation.action === 'display_campaign_full_create') return ok(await createDisplayCampaignFull(cfg, p.customer_id, p.payload));
+  if (mutation.action === 'performance_max_campaign_full_create') return ok(await createPerformanceMaxCampaignFull(cfg, p.customer_id, p.payload));
   if (mutation.action === 'display_campaign_create') return ok(await createDisplayCampaign(cfg, p.customer_id, p.campaign_name, p.daily_budget_micros));
 
   if (mutation.action === 'performance_max_campaign_create') {
@@ -80,7 +89,15 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   }
 
   if (mutation.action === 'ad_group_create') return ok(await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros));
-  if (mutation.action === 'display_ad_group_create') return ok(await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros));
+  if (mutation.action === 'display_ad_group_create') return ok(await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros, { optimizedTargetingEnabled: p.optimized_targeting_enabled }));
+
+  if (mutation.action === 'ad_group_settings_update') {
+    return ok(await updateAdGroupSettings(cfg, p.customer_id, p.ad_group_id, { optimizedTargetingEnabled: p.optimized_targeting_enabled }));
+  }
+
+  if (mutation.action === 'remove_ad_group_criterion') {
+    return ok(await removeAdGroupCriteria(cfg, p.customer_id, p.resource_names));
+  }
 
   if (mutation.action === 'asset_group_create') {
     return ok(await createAssetGroup(cfg, p.customer_id, p.campaign_id, p.asset_group_name, p.final_urls,
@@ -105,6 +122,10 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
       : { level: 'ad_group' as const, adGroupId: p.ad_group_id };
     return ok(await createNegativeKeywords(cfg, p.customer_id, target,
       p.keywords.map((kw: any) => ({ text: kw.text, matchType: kw.match_type }))));
+  }
+
+  if (mutation.action === 'negative_topics_create') {
+    return ok(await createNegativeTopics(cfg, p.customer_id, p.campaign_id, p.topic_constants));
   }
 
   if (mutation.action === 'campaign_targeting_create') {

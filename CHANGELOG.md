@@ -1,0 +1,25 @@
+# Changelog
+
+## v0.12.0
+
+### Added
+- **Composite full-campaign tools** — `prepare_search_campaign_full`, `prepare_display_campaign_full`, `prepare_performance_max_campaign_full`: build a whole campaign (budget + campaign + bidding + geo/language + negatives + ad groups + keywords + responsive ads + extensions) in ONE atomic API transaction with a single confirmation. Drastically fewer model turns and confirm cycles than chaining granular `prepare_*` calls.
+- **Presets** — pass a preset (`ecommerce-search-pl`, `leadgen-search-pl`) plus only the variable fields; the preset fills sane defaults (exact + phrase match, geo PL, language PL, conversion-based bidding with manual CPC fallback).
+- **`get_build_context`** — one-shot read tool returning campaigns, ad groups, enabled conversion actions, and reusable image assets in a single call, so the model can plan a build without several round-trips.
+- **Server instructions** — the MCP server now ships usage guidance steering clients toward the composite tools, batch confirmation (`confirm_all_mutations`), and PAUSED-by-default new campaigns.
+- **`check_update` changelog** — update checks now show what changed between the local and remote versions, sourced from this file.
+
+### Fixed
+- Root `package.json` version was lagging behind the other manifests (the file `check_update` compares against); all manifests are now in sync.
+
+## v0.11.0
+
+### Added
+- 6 new `prepare_*` tools (demographic bid modifiers, conversion goals, shared sets, ad schedules, keyword/ad status).
+- Sitelink `final_urls` moved to asset level so URL query params work correctly.
+
+## v0.10.0
+
+### Added
+- Mutation audit log (`mutation-history.jsonl`) with `get_mutation_history` / `get_mutation_stats`.
+- Custom OAuth app credentials in the authorization flow.
