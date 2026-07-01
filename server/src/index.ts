@@ -8,7 +8,7 @@ import { registerAuthTools } from './tools/auth.js';
 async function main() {
   const server = new McpServer({
     name: 'google-ads-baby',
-    version: '0.1.0',
+    version: '0.14.0',
   }, {
     instructions: [
       'Work fast: prefer the composite *_full creation tools over chains of granular prepare_* calls.',

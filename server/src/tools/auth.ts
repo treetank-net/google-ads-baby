@@ -91,7 +91,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
   );
 
   server.tool(
-    'check_update',
+    'update_plugin',
     'Check for plugin updates and install them. After updating, the user must restart the session for changes to take effect.',
     {},
     async () => {
@@ -117,6 +117,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
           ['package.json', join(root, 'package.json')],
           ['hooks.json', join(root, 'hooks.json')],
           ['scripts/safety-hook.js', join(root, 'scripts', 'safety-hook.js')],
+          ['scripts/knowledge-hook.js', join(root, 'scripts', 'knowledge-hook.js')],
           ['scripts/start-mcp.js', join(root, 'scripts', 'start-mcp.js')],
           ['CHANGELOG.md', join(root, 'CHANGELOG.md')],
         ];

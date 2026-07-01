@@ -1,6 +1,6 @@
 {
   "name": "google-ads-baby",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Google Ads campaign management MCP server with two-phase safety confirmations, plus an interim marketing-knowledge store.",
   "author": {
     "name": "Jacek Mariański",

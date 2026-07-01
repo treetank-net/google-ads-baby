@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.0
+
+### Changed
+- Renamed the updater tool from `check_update` to `update_plugin`.
+- The updater now installs the marketing knowledge prompt hook script when refreshing plugin files.
+
 ## v0.13.0
 
 ### Added
@@ -12,10 +18,10 @@
 - **Presets** — pass a preset (`ecommerce-search-pl`, `leadgen-search-pl`) plus only the variable fields; the preset fills sane defaults (exact + phrase match, geo PL, language PL, conversion-based bidding with manual CPC fallback).
 - **`get_build_context`** — one-shot read tool returning campaigns, ad groups, enabled conversion actions, and reusable image assets in a single call, so the model can plan a build without several round-trips.
 - **Server instructions** — the MCP server now ships usage guidance steering clients toward the composite tools, batch confirmation (`confirm_all_mutations`), and PAUSED-by-default new campaigns.
-- **`check_update` changelog** — update checks now show what changed between the local and remote versions, sourced from this file.
+- **`update_plugin` changelog** — update checks now show what changed between the local and remote versions, sourced from this file.
 
 ### Fixed
-- Root `package.json` version was lagging behind the other manifests (the file `check_update` compares against); all manifests are now in sync.
+- Root `package.json` version was lagging behind the other manifests (the file `update_plugin` compares against); all manifests are now in sync.
 
 ## v0.11.0
 

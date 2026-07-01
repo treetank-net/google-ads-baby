@@ -1,6 +1,6 @@
 {
   "name": "google-ads-baby-server",
-  "version": "0.12.0",
+  "version": "0.14.0",
   "description": "Google Ads MCP server with two-phase mutation safety",
   "type": "module",
   "main": "dist/index.js",

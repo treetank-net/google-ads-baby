@@ -9,7 +9,10 @@
     "UserPromptSubmit": [
       {
         "matcher": "",
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit" }]
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/safety-hook.js\" user-submit" },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-hook.js\"" }
+        ]
       }
     ]
   }
