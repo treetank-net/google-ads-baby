@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
@@ -19,6 +19,7 @@ function localVersion() {
 async function download(remotePath, localPath) {
   const res = await fetch(`${REPO_RAW}/${remotePath}`);
   if (!res.ok) return false;
+  mkdirSync(dirname(localPath), { recursive: true });
   writeFileSync(localPath, Buffer.from(await res.arrayBuffer()));
   return true;
 }

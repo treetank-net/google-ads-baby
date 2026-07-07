@@ -6,13 +6,6 @@
       "env": {
         "GOOGLE_ADS_ENABLE_MANUAL_CONFIRM": "0"
       }
-    },
-    "marketing-knowledge": {
-      "command": "npx",
-      "args": ["-y", "@movibe/memory-bank-mcp@0.4.1", "--path", "${MARKETING_KNOWLEDGE_DIR}"],
-      "env": {
-        "MARKETING_KNOWLEDGE_DIR": "${MARKETING_KNOWLEDGE_DIR:-}"
-      }
     }
   }
 }

@@ -1,10 +1,16 @@
 # Changelog
 
+## v0.14.1
+
+### Fixed
+- Cursor/GitHub plugin startup now creates missing runtime directories before downloading `server/bundle.cjs`.
+- Removed the interim `marketing-knowledge` MCP server and prompt hook from active plugin manifests. Use the dedicated `marketing-context-mcp` plugin for durable marketing memory.
+
 ## v0.14.0
 
 ### Changed
 - Renamed the updater tool from `check_update` to `update_plugin`.
-- The updater now installs the marketing knowledge prompt hook script when refreshing plugin files.
+- The updater now refreshes plugin hook scripts when updating runtime files.
 
 ## v0.13.0
 
