@@ -17,5 +17,6 @@ mirror-github:
         exit 1
       fi
     - git checkout -B master "$CI_COMMIT_SHA"
-    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master
+    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master:master
+    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master:main
     - git push --force --tags "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git"
