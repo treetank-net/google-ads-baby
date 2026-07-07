@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.15.0
+
+### Added
+- **Read-only analysis tools (P1 review loops).** Four tools that read an account, diagnose, and hand back structured follow-ups without ever mutating — each returns `findings` with `severity`, `metrics`, a `suggested_task` (ready for `append_task` in `marketing-context`, `source_type: review`), and possible `prepare_*` actions:
+  - `get_account_hygiene_report` — daily-check scan: zero-spend, low budget utilization, spend-with-no-conversions.
+  - `get_budget_scaling_candidates` — SEARCH/SHOPPING campaigns that are budget-constrained (utilization ≥ 90% **and** search IS lost to budget > 10%), pointing at the budget-scaling workflow.
+  - `get_search_terms_waste_candidates` — negative-keyword candidates: cost ≥ threshold with 0 conversions in the recent window, with a longer-window cross-check that excludes historically-converting bounce-backs.
+  - `get_pmax_channel_breakdown` — Performance Max asset-group cost/conversion breakdown with per-campaign share, flagging asset groups that burn budget with 0 conversions. (Google Ads exposes no clean per-channel PMax split via GAQL; the finer feed-only-leak check still needs the manual placement report.)
+- Thresholds mirror BDOS `DAILY_DEFAULTS`/`MONTHLY_DEFAULTS` and the `google-ads-daily-check` / `google-ads-monthly-review` knowledge workflows; the decision logic lives in pure, unit-tested functions (`tools/analysis-helpers.ts`), covered by the smoke suite with synthetic rows. Live end-to-end verification against a real account is still pending (shared with the existing E2E TODO).
+
 ## v0.14.1
 
 ### Fixed

@@ -35,6 +35,8 @@ tools/
   read.ts                 — orchestrator: registerReadTools()
   read-helpers.ts         — schemas, query builders, pure functions
   read-accounts.ts        — list_accounts, get_campaigns, execute_gaql, list_ads_entities, get_ad_blueprint
+  read-analysis.ts        — read-only review loops: get_account_hygiene_report, get_budget_scaling_candidates, get_search_terms_waste_candidates, get_pmax_channel_breakdown
+  analysis-helpers.ts     — thresholds (BDOS DAILY/MONTHLY_DEFAULTS), GAQL query builders, and pure analyzer functions for read-analysis.ts (unit-tested in smoke)
   read-history.ts         — get_mutation_history, get_mutation_stats
   write.ts                — orchestrator: registerWriteTools()
   write-schemas.ts        — Zod schemas, safety constants (budget caps, limits)
@@ -60,9 +62,15 @@ tools/
 6. **`npm run build`** po każdej zmianie w `src/` — bundle.cjs musi być aktualny
 
 **Nowy read tool:**
-1. Handler → `read-accounts.ts` (dane z Google Ads) lub `read-history.ts` (lokalne dane)
-2. Query buildery / helpery → `read-helpers.ts`
+1. Handler → `read-accounts.ts` (surowe dane z Google Ads), `read-analysis.ts` (diagnostyka/review loop zwracająca findings + suggested_task + prepare_actions) lub `read-history.ts` (lokalne dane)
+2. Query buildery / helpery → `read-helpers.ts`; dla toolów analitycznych: progi, buildery GAQL i **czyste funkcje analizujące** → `analysis-helpers.ts`
 3. Jeśli nowy typ encji w `list_ads_entities` → rozszerz `entitySchema` i `buildListQuery()` w `read-helpers.ts`
+
+**Konwencja toolów analitycznych (`read-analysis.ts`):**
+- Handler jest cienki: waliduje `customer_id`, buduje okno (`windowClause`), robi `executeGaql`, woła czysty analizator, zwraca `{report, customer_id, ..., findings, follow_up}`.
+- Cała logika decyzyjna (progi, severity, suggested_task, prepare_actions) siedzi w czystych funkcjach w `analysis-helpers.ts` — testowalna bez API i pokryta w `test/smoke.ts` syntetycznymi wierszami.
+- Toole analityczne **nigdy nie mutują** — proponują `prepare_*` actions i follow-up taski, nie wołają ich.
+- Progi domyślne odzwierciedlają workflowy wiedzy (`google-ads-daily-check.md`, `google-ads-monthly-review.md`) w `marketing-context`.
 
 **Nowa funkcja client (Google Ads API):**
 1. Dobierz plik wg domeny: `client/campaigns.ts`, `client/ads.ts`, `client/assets.ts`
@@ -237,6 +245,7 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 ### Średnioterminowe
 - [ ] OS dialog fallback (`zenity`/`osascript`) dla klientów bez hooków — konfigurowalny w env var
 - [x] Audit log — `mutation-history.jsonl` + `get_mutation_history` / `get_mutation_stats` toole
+- [x] Read-only review loops (P1) — `get_account_hygiene_report`, `get_budget_scaling_candidates`, `get_search_terms_waste_candidates`, `get_pmax_channel_breakdown`. Zwracają findings + suggested_task (do `append_task` w `marketing-context`) + prepare_actions. Progi = workflowy wiedzy. Czysta logika testowana w smoke; E2E na żywym koncie dalej TODO.
 - [ ] Rate limiting — max N mutacji na minutę (server-side)
 - [ ] Konfigurowalny budget cap per-account (nie globalny 500 PLN)
 - [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania

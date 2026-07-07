@@ -11,7 +11,7 @@
       "description": "Google Ads campaign management with two-phase safety confirmations. Read campaigns, adjust budgets, pause/enable — every mutation requires explicit user approval.",
       "name": "google-ads-baby",
       "source": "./",
-      "version": "0.14.1"
+      "version": "0.15.0"
     }
   ]
 }

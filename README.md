@@ -141,6 +141,14 @@ Read:
 - `get_ad_blueprint`
 - `execute_gaql`
 
+Read-only analysis (review loops — return findings, severity, a suggested
+follow-up task, and possible `prepare_*` actions; never mutate):
+
+- `get_account_hygiene_report`
+- `get_budget_scaling_candidates`
+- `get_search_terms_waste_candidates`
+- `get_pmax_channel_breakdown`
+
 Write preparation:
 
 - `prepare_campaign_status`
