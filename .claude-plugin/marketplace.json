@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "description": "Google Ads campaign management with two-phase safety confirmations. Read campaigns, adjust budgets, pause/enable — every mutation requires explicit user approval.",
+      "description": "Google Ads campaign management MCP server with two-phase safety confirmations: build complete Search/Display/Performance Max campaigns, manage keywords, ads, budgets, targeting, ad schedules, conversion goals and assets, plus read-only account analysis (hygiene report, budget scaling, search-terms waste, PMax breakdown). Every mutation requires explicit user approval.",
       "name": "google-ads-baby",
       "source": "./",
       "version": "0.15.0"

@@ -124,6 +124,7 @@ Multiple `prepare_*` calls can share the same `safe_word`. After one user confir
 - `.gitlab-ci.yml`: mirror job pushuje `master` + tagi do GitHuba przy każdym pushu (runner tag: `vps`, wymaga `GITHUB_TREETANK_TOKEN` w CI/CD variables)
 
 ## Commands
+- `node scripts/generate-readme-tools.mjs` — regeneruj listę tooli w README z `server/src/tools/` (uruchamiaj po każdym dodaniu/zmianie nazwy toola)
 - `cd server && npm install && npm run build` — zainstaluj zależności, skompiluj TS i zbuduj bundle
 - `cd server && npm run dev` — watch mode (rebuild TS przy zmianach, bundle trzeba przebudować ręcznie)
 - `cd server && npm start` — uruchom MCP server z bundle.cjs

@@ -1,13 +1,18 @@
 {
   "name": "google-ads-baby",
   "version": "0.15.0",
-  "description": "Google Ads campaign management MCP server with two-phase safety confirmations.",
+  "description": "Google Ads campaign management MCP server with two-phase safety confirmations: build complete Search/Display/Performance Max campaigns, manage keywords, ads, budgets, targeting, ad schedules, conversion goals and assets, plus read-only account analysis (hygiene report, budget scaling, search-terms waste, PMax breakdown). Every mutation requires explicit user approval.",
   "author": {
     "name": "Jacek Mariański",
     "url": "https://treetank.net"
   },
   "license": "MIT",
-  "keywords": ["google-ads", "mcp", "campaigns", "safety"],
+  "keywords": [
+    "google-ads",
+    "mcp",
+    "campaigns",
+    "safety"
+  ],
   "hooks": "./hooks.json",
   "mcpServers": "./.mcp.json",
   "interface": {
@@ -16,7 +21,10 @@
     "longDescription": "Google Ads MCP server for listing accounts and campaigns, adjusting budgets, changing campaign status, and preparing new Search campaigns, ad groups, and responsive search ads with two-phase safety confirmation.",
     "developerName": "Jacek Mariański",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
     "defaultPrompt": [
       "Set up Google Ads authentication.",
       "List my Google Ads accounts.",
