@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.15.1
+
+### Fixed
+- Remediated production dependency audit findings in the MCP server by updating `google-ads-api` and vulnerable transitive dependencies.
+
+### Changed
+- Rebuilt and committed `server/bundle.cjs` for the dependency-remediated server release.
+
 ## v0.15.0
 
 ### Added
