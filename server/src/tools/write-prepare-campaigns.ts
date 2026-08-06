@@ -125,7 +125,10 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       if (budgetError) return validationResult(budgetError);
       const newMicros = amountToMicros(new_budget_amount);
       const normalizedBudgetId = normalizeResourceId(budget_id);
-      const preview = `Change budget of campaign "${campaign_name}": ${formatUnits(current_budget_amount, limits.currency)} -> ${formatUnits(new_budget_amount, limits.currency)}/day (account ${normalizedCustomerId})`;
+      const preview = [
+        `Change budget of campaign "${campaign_name}" (account ${normalizedCustomerId})`,
+        microsChangeLine('Daily budget', amountToMicros(current_budget_amount), newMicros, limits.currency),
+      ].join('\n');
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },

@@ -11,6 +11,7 @@ import {
   type AmountLimits,
   amountToMicros,
   formatAmount,
+  formatAmountExact,
   formatUnits,
 } from './amounts.js';
 
@@ -18,6 +19,7 @@ export {
   type AmountLimits,
   amountToMicros,
   formatAmount,
+  formatAmountExact,
   formatUnits,
   loadAmountLimits,
   resolveAmountLimits,
@@ -83,8 +85,20 @@ export function changeLine(label: string, before: unknown, after: unknown): stri
   return `${label}: ${from} → ${String(after)}`;
 }
 
+export function textChangeLines(label: string, before: string[], after: string[]): string[] {
+  const kept = new Set(after.filter((value) => before.includes(value)));
+  const mark = (value: string, marker: string) => `    ${kept.has(value) ? '=' : marker} ${value}`;
+  return [
+    `${label}: ${before.length} item(s) → ${after.length} item(s)`,
+    `  before:`,
+    ...(before.length ? before.map((value) => mark(value, '-')) : ['    (none)']),
+    `  after:`,
+    ...(after.length ? after.map((value) => mark(value, '+')) : ['    (none)']),
+  ];
+}
+
 export function microsChangeLine(label: string, beforeMicros: number | undefined, afterMicros: number, currency: string): string {
-  const base = `${label}: ${formatAmount(beforeMicros, currency)} → ${formatAmount(afterMicros, currency)}`;
+  const base = `${label}: ${formatAmountExact(beforeMicros, currency)} → ${formatAmountExact(afterMicros, currency)}`;
   if (!beforeMicros || beforeMicros <= 0) return base;
   const factor = afterMicros / beforeMicros;
   if (factor >= 1.5) return `${base} (${factor.toFixed(1)}x more)`;
@@ -109,9 +123,12 @@ export function manualBiddingRequiredWarning(biddingStrategyType: string | undef
 }
 
 export function sharedBudgetWarning(referenceCount: number | undefined, explicitlyShared: boolean | undefined): string | null {
-  if (!explicitlyShared && (referenceCount ?? 1) <= 1) return null;
   const count = referenceCount ?? 0;
-  return `Warning: this budget is shared by ${count} campaign(s). Changing it affects every campaign using it, not only this one.`;
+  if (count > 1) {
+    return `Warning: this budget is shared by ${count} campaigns. Changing it affects every one of them, not only this campaign.`;
+  }
+  if (!explicitlyShared) return null;
+  return 'Note: this is a shared budget resource, currently used by this campaign only. Changing it is safe today, but any campaign later attached to it inherits the new amount.';
 }
 
 export function validateCustomer(customerId: string) {

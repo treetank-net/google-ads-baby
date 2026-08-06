@@ -78,6 +78,25 @@ async function listAccessibleAccounts(cfg: AdsConfig): Promise<Array<{ id: strin
   });
 }
 
+async function loginCustomerIdError(cfg: AdsConfig, refreshToken: string, developerToken: string, mccId: string): Promise<string | null> {
+  const id = mccId.replace(/\D/g, '');
+  if (!id) return 'Pick the account (or the manager account) whose data this plugin should read.';
+  try {
+    const api = new GoogleAdsApi({
+      client_id: cfg.clientId, client_secret: cfg.clientSecret, developer_token: developerToken,
+    });
+    const customer = api.Customer({ customer_id: id, login_customer_id: id, refresh_token: refreshToken });
+    await customer.query('SELECT customer.id FROM customer LIMIT 1');
+    return null;
+  } catch (err: any) {
+    const raw = JSON.stringify(err?.errors ?? err?.message ?? err);
+    if (raw.includes('USER_PERMISSION_DENIED') || raw.includes('CUSTOMER_NOT_FOUND')) {
+      return `The Google account you just authorized cannot access customer ${id}. Pick one of the accounts listed above — the list shows exactly what this login can reach. Saving an account it cannot reach would leave the plugin unusable.`;
+    }
+    return `Could not verify access to customer ${id}: ${raw}`;
+  }
+}
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -382,6 +401,11 @@ export function startAuthFlow(cfg: AdsConfig): { url: string; shortUrl: string; 
         const safetyLevel = ['strict', 'standard', 'off'].includes(body.safety_level) ? body.safety_level : 'standard';
         const mutationTokenTtlSeconds = /^\\d+$/.test(String(body.mutation_token_ttl_seconds || '')) ? String(body.mutation_token_ttl_seconds) : '';
         const confirmStateTtlSeconds = /^\\d+$/.test(String(body.confirm_state_ttl_seconds || '')) ? String(body.confirm_state_ttl_seconds) : '';
+        const accessError = await loginCustomerIdError(cfg, cfg.refreshToken, body.developer_token, String(body.mcc_id ?? ''));
+        if (accessError) {
+          json(400, { error: accessError });
+          return;
+        }
         await saveConfig({
           developerToken: body.developer_token,
           loginCustomerId: body.mcc_id,

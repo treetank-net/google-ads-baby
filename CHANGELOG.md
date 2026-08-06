@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.20.1
+
+First release driven by running `prepare_*` against a live account instead of synthetic rows. Eight
+prepare calls on a paused sandbox account produced five defects, all in the text a user reads before
+deciding whether to confirm — the layer no unit test had been looking at.
+
+### Fixed
+- **A shared budget used by one campaign contradicted itself.** The preview said "shared by 1 campaign(s) … affects every campaign using it, not only this one" — a warning about other campaigns while stating there are none. The two cases are now separate: more than one reference is a warning, an `explicitly_shared` budget with a single reference is a neutral note that says the amount will be inherited by anything attached later.
+- **`prepare_ad_update` hid what it was changing.** Editing headlines or descriptions previewed as "Descriptions: 2 item(s) → 2 item(s)", so a user could not see whether the new copy was right, or that the old copy was being dropped. New `textChangeLines()` prints both lists with `=` for kept, `-` for removed and `+` for added entries.
+- **Amount change lines dropped decimals inconsistently.** `1 PLN → 3.5 PLN` for a budget change, because the shared formatter trimmed trailing zeros. Money in a `before → after` line now always shows two decimals (`1.00 PLN → 3.50 PLN`); the trimming formatter stays for prose.
+- **`prepare_budget_change` drew its own arrow.** It printed `->` while every other preview printed `→`, and it computed the change text separately from the shared helper. It now goes through `microsChangeLine()`, so it also gains the multiple/percent annotation the other tools had.
+- **The OAuth page saved an MCC ID it could not reach.** `/save-config` wrote `loginCustomerId` without checking it, and the next call failed with a raw `USER_PERMISSION_DENIED` from the API with nothing pointing at the cause. It broke a real session during this test. The endpoint now verifies access before saving and returns a message naming the accounts the token can actually see.
+
 ## v0.20.0
 
 The plugin claimed every amount was in PLN. On the EUR, CZK and HUF accounts in the same MCC that

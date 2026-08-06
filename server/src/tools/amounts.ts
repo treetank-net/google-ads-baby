@@ -71,6 +71,12 @@ export function formatAmount(micros: number | undefined | null, currency: string
   return formatUnits(Number((micros / MICROS_PER_UNIT).toFixed(2)), currency);
 }
 
+export function formatAmountExact(micros: number | undefined | null, currency: string): string {
+  if (micros === undefined || micros === null) return '(not set)';
+  const rendered = (micros / MICROS_PER_UNIT).toFixed(2);
+  return currency ? `${rendered} ${currency}` : `${rendered} account currency unit(s)`;
+}
+
 export function amountFieldDescription(purpose: string): string {
   return `${purpose} in account currency units (the account currency is shown by list_accounts); capped by the server safety limit`;
 }

@@ -26,6 +26,7 @@ import {
   targetCpaLimitError,
   changeLine,
   microsChangeLine,
+  textChangeLines,
   manualBiddingRequiredWarning,
   enumName,
   sharedBudgetWarning,
@@ -383,7 +384,24 @@ function testLimitHelpers() {
   assert('enumName maps ad group status to names', enumName(enums.AdGroupStatus as any, 3) === 'PAUSED');
   assert('enumName leaves an unknown value visible', enumName(enums.AdGroupStatus as any, 987) === '987');
   assert('unshared budget needs no warning', sharedBudgetWarning(1, false) === null);
-  assert('shared budget warns about other campaigns', (sharedBudgetWarning(3, true) ?? '').includes('3 campaign(s)'));
+  assert('shared budget warns about other campaigns', (sharedBudgetWarning(3, true) ?? '').includes('shared by 3 campaigns'));
+  // A shared-type budget used by exactly one campaign used to read "shared by 1
+  // campaign(s) ... affects every campaign using it, not only this one", which
+  // contradicts itself. Seen live on the sandbox account.
+  const soleUser = sharedBudgetWarning(1, true) ?? '';
+  assert('a shared budget with one user does not claim other campaigns are affected', !soleUser.includes('not only this one'));
+  assert('a shared budget with one user still says it is a shared resource', soleUser.includes('shared budget resource'));
+  assert('an unshared budget with a stale count of 0 stays silent', sharedBudgetWarning(0, false) === null);
+
+  assert('amounts in a change line always keep two decimals', microsChangeLine('Daily budget', 1_000_000, 3_500_000, 'PLN').startsWith('Daily budget: 1.00 PLN → 3.50 PLN'));
+  assert('cap messages keep whole numbers readable', (budgetLimitError(9999, resolveAmountLimits(SMOKE_CFG, 'PLN')) ?? '').includes('(500 PLN/day)'));
+
+  const textLines = textChangeLines('Descriptions', ['Paused test ad', 'File-path assets test'], ['Paused test ad', 'Currency preview check']);
+  assert('text changes show the previous values, not just the count', textLines.join('\n').includes('File-path assets test'));
+  assert('text changes mark what is removed', textLines.some((l) => l.includes('- File-path assets test')));
+  assert('text changes mark what is added', textLines.some((l) => l.includes('+ Currency preview check')));
+  assert('text changes mark what is kept', textLines.some((l) => l.includes('= Paused test ad')));
+  assert('emptying a list is explicit', textChangeLines('Headlines', ['a'], []).join('\n').includes('(none)'));
 
   assert('display ad text limits enforced', (validateResponsiveDisplayText(['a', 'b', 'c', 'd', 'e', 'f'], ['d']) ?? '').includes('1-5 headlines'));
   assert('valid display ad text passes', validateResponsiveDisplayText(['a'], ['d']) === null);

@@ -31,6 +31,7 @@ import {
   validateAssetPlacement,
   loadAdState,
   changeLine,
+  textChangeLines,
 } from './write-helpers.js';
 
 export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void {
@@ -394,14 +395,8 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       ];
       if (status !== undefined) lines.push(changeLine('Status', state.status, status));
       if (final_url !== undefined) lines.push(changeLine('Final URL', state.finalUrls[0], final_url));
-      if (headlines !== undefined) {
-        lines.push(changeLine('Headlines', `${state.headlines.length} item(s)`, `${nextHeadlines.length} item(s)`));
-        lines.push(...nextHeadlines.map((headline) => `  - ${headline}`));
-      }
-      if (descriptions !== undefined) {
-        lines.push(changeLine('Descriptions', `${state.descriptions.length} item(s)`, `${nextDescriptions.length} item(s)`));
-        lines.push(...nextDescriptions.map((description) => `  - ${description}`));
-      }
+      if (headlines !== undefined) lines.push(...textChangeLines('Headlines', state.headlines, nextHeadlines));
+      if (descriptions !== undefined) lines.push(...textChangeLines('Descriptions', state.descriptions, nextDescriptions));
       if (textChanged) {
         lines.push('Warning: this replaces the ad text in place, so the previous wording is lost and asset-level performance data restarts for the changed assets. Clone the ad first if you want to keep the current version running.');
       }
