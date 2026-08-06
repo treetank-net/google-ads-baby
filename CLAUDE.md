@@ -94,6 +94,16 @@ jest zawsze fałszywe na żywych danych i **testy syntetyczne go nie wyłapią**
 podaje się nazwy. Nowy test na danych z GAQL musi karmić analizator liczbami
 (patrz `display: numeric ...` w `test/smoke.ts`).
 
+**Format odpowiedzi read toolów — TSV, nie JSON:**
+Każdy read tool zwracający **listę wierszy** musi przechodzić przez `tsvDocument()` / `toTsv()`
+(`tools/format.ts`), nie przez `JSON.stringify`. JSON pretty-print powtarza nazwy kluczy raz na
+wiersz — zmierzone na żywym koncie: `list_ads_entities(ads)` przy 50 wierszach kosztował 16 150
+tokenów w JSON i 2 715 w TSV. `toTsv()` dodatkowo obcina prefiks `customers/123/...` do samego ID,
+dekoduje enumy (`ENUM_COLUMNS`) i skleja pola powtarzalne separatorem ` ~ ` (**nie** `|` — nazwy
+kampanii na kontach klienta zawierają `|`). Nowa kolumna enumowa musi trafić do `ENUM_COLUMNS`,
+inaczej model zobaczy liczbę. JSON zostaje dla struktur **semantycznych**, nie tabelarycznych:
+`findings`, `preview`, `get_ad_blueprint`.
+
 **Konwencje:**
 - Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
 - Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `plnFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_pln` wg reguł `PLN_FIELD_LIMITS`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_pln` z absurdalną kwotą, więc pominięty limit oblewa testy.

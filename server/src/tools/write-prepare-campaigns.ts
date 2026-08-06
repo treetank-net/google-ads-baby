@@ -62,7 +62,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_id: z.string().describe('Campaign ID'),
       campaign_name: z.string().describe('Campaign name (for preview)'),
       new_status: z.enum(['ENABLED', 'PAUSED']).describe('Target status'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, campaign_name, new_status, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -82,7 +82,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       campaigns: z.array(campaignRefSchema).min(1).max(20).describe('Campaigns to remove'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaigns, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -113,7 +113,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_name: z.string().describe('Campaign name (for preview)'),
       current_budget_pln: z.number().describe('Current daily budget in PLN'),
       new_budget_pln: z.number().describe('New daily budget in PLN'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, budget_id, campaign_name, current_budget_pln, new_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -141,7 +141,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       strategy_type: biddingStrategyTypeSchema.optional().describe('New bidding strategy type'),
       target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN, required for TARGET_CPA; capped by server safety limit'),
       target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400%; required for TARGET_ROAS'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, name, status, daily_budget_pln, strategy_type, target_cpa_pln, target_roas, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -219,7 +219,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_name: z.string().min(1).describe('New campaign name'),
       daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -281,7 +281,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         country_code: z.string().describe('ISO country code, e.g. PL'),
         phone_number: z.string().describe('Phone number'),
       }).optional(),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
@@ -357,7 +357,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         square_marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('Existing square image asset IDs (1:1)'),
         logo_image_asset_ids: z.array(z.string().regex(/^\d+$/)).max(5).describe('Existing logo asset IDs'),
       }),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
@@ -428,7 +428,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         text: z.string().min(1).max(80).optional().describe('Required for SEARCH_THEME'),
         audience_id: z.string().regex(/^\d+$/).optional().describe('Required for AUDIENCE'),
       })).optional(),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
@@ -471,7 +471,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_name: z.string().min(1).describe('New campaign name'),
       daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -499,7 +499,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       daily_budget_pln: z.number().positive().describe('Daily budget in PLN; capped by server safety limit'),
       business_name_asset_id: z.string().optional().describe('Optional existing TEXT asset ID for PMax brand guidelines business name'),
       logo_asset_id: z.string().optional().describe('Optional existing square IMAGE asset ID for PMax brand guidelines logo'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_pln, business_name_asset_id, logo_asset_id, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -539,7 +539,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_id: z.string().describe('Existing campaign ID'),
       ad_group_name: z.string().min(1).describe('New ad group name'),
       cpc_bid_pln: z.number().positive().describe('Max CPC bid in PLN; capped by server safety limit'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -569,7 +569,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       ad_group_name: z.string().min(1).describe('New ad group name'),
       cpc_bid_pln: z.number().positive().describe('Max CPC bid in PLN; capped by server safety limit'),
       optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag. Set false to keep delivery strictly within your audience selection. Omit to use the Google default.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, optimized_targeting_enabled, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -607,7 +607,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       status: entityStatusSchema.optional().describe('New ad group status'),
       name: z.string().min(1).optional().describe('New ad group name'),
       optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag: true to enable, false to keep delivery within your audience selection'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, cpc_bid_pln, status, name, optimized_targeting_enabled, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -652,7 +652,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       resource_names: z.array(adGroupCriterionResourceNameSchema).min(1).max(MAX_AD_GROUP_CRITERIA_PER_MUTATION).describe('Ad group criterion resource names, e.g. customers/123/adGroupCriteria/456~789'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, resource_names, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -681,7 +681,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_id: z.string().describe('Campaign ID to exclude topics from'),
       topics: z.array(negativeTopicSchema).min(1).max(MAX_NEGATIVE_TOPICS_PER_MUTATION).describe('Topic constants to exclude, e.g. ["topicConstants/1149"] or ["1149"]'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, topics, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -714,7 +714,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_id: z.string().describe('Existing campaign ID'),
       location_criterion_ids: criterionIdListSchema.default([]).describe('Geo target constant criterion IDs, e.g. 2616 for Poland'),
       language_criterion_ids: criterionIdListSchema.default([]).describe('Language constant criterion IDs, e.g. 1045 for Polish, 1000 for English'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, location_criterion_ids, language_criterion_ids, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -753,7 +753,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       strategy_type: biddingStrategyTypeSchema.describe('Bidding strategy type'),
       target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN (required for TARGET_CPA); capped by server safety limit'),
       target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400% ROAS (required for TARGET_ROAS)'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, strategy_type, target_cpa_pln, target_roas, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -800,7 +800,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         label: z.string().describe('Human-readable label for preview, e.g. "AGE_RANGE_65_UP" or "FEMALE"'),
         bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).describe('Bid modifier multiplier: 0.0 to exclude, 1.0 = no change, 1.5 = +50%, 0.5 = -50%'),
       })).min(1).max(MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION).describe('Demographic bid modifiers to set'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, level, campaign_id, ad_group_id, modifiers, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -848,7 +848,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         biddable: z.boolean().describe('true = PRIMARY (Smart Bidding optimizes for this), false = SECONDARY (tracked but not optimized)'),
         label: z.string().describe('Human-readable label for preview, e.g. "PURCHASE / WEBSITE"'),
       })).min(1).max(MAX_CONVERSION_GOALS_PER_MUTATION).describe('Conversion goals to update'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, goals, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -883,7 +883,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       campaign_name: z.string().describe('Campaign name (for preview)'),
       shared_set_id: z.string().describe('Shared set ID (from execute_gaql on shared_set resource)'),
       shared_set_name: z.string().describe('Shared set name (for preview)'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, campaign_name, shared_set_id, shared_set_name, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -915,7 +915,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         end_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO').describe('End minute'),
         bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).default(1.0).describe('Bid modifier: 1.0 = no change, 1.5 = +50%'),
       })).min(1).max(MAX_AD_SCHEDULES_PER_MUTATION).describe('Ad schedule entries'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, schedules, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -975,7 +975,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         asset_id: z.string(),
         field_type: campaignAssetFieldTypeSchema,
       })).max(20).default([]).describe('Existing assets to link (e.g. images with AD_IMAGE, logos with LOGO)'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, sitelinks, callouts, call, structured_snippet, existing_asset_links, safe_word }) => {
       const customerError = validateCustomer(customer_id);

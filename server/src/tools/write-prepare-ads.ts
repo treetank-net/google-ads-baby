@@ -43,7 +43,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('3-15 responsive search ad headlines, max 30 chars each'),
       descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('2-4 responsive search ad descriptions, max 90 chars each'),
       final_url: z.string().url().describe('Landing page URL'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, headlines, descriptions, final_url, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -81,7 +81,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 IMAGE asset IDs, e.g. ["123","456"]'),
       square_marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 square IMAGE asset IDs'),
       logo_image_asset_ids: displayLogoAssetIdListSchema.describe('Optional logo IMAGE asset IDs, up to 5'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({
       customer_id,
@@ -156,7 +156,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement marketing image asset IDs for responsive display ads.'),
       square_marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement square marketing image asset IDs for responsive display ads.'),
       logo_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement logo image asset IDs for responsive display ads.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({
       customer_id,
@@ -285,7 +285,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       ad_group_id: z.string().describe('Existing Search ad group ID'),
       keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, keywords, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -324,7 +324,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
         label: z.string().describe('Keyword text for preview, e.g. "BROAD: transport services"'),
         new_status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']).describe('Target status'),
       })).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to update'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, keywords, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -363,7 +363,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       final_url: z.string().url().optional().describe('New landing page URL'),
       headlines: z.array(z.string().min(1)).optional().describe('Replacement headlines; replaces the full list. Search ads need 3-15, display ads 1-5, max 30 chars each.'),
       descriptions: z.array(z.string().min(1)).optional().describe('Replacement descriptions; replaces the full list. Search ads need 2-4, display ads 1-5, max 90 chars each.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_id, status, final_url, headlines, descriptions, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -429,7 +429,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       ad_id: z.string().describe('Ad ID (from execute_gaql or list_ads_entities)'),
       ad_name: z.string().describe('Ad description for preview, e.g. "RSA: Transport | Logistics | ..."'),
       new_status: z.enum(['ENABLED', 'PAUSED']).describe('Target status'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, ad_id, ad_name, new_status, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -458,7 +458,7 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       campaign_id: z.string().optional().describe('Campaign ID, required when level=campaign'),
       ad_group_id: z.string().optional().describe('Ad group ID, required when level=ad_group'),
       keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Negative keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, level, campaign_id, ad_group_id, keywords, safe_word }) => {
       const customerError = validateCustomer(customer_id);

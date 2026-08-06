@@ -4,6 +4,7 @@ import type { AdsConfig } from '../config.js';
 import { listAccounts, executeGaql, getCampaigns } from '../client.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, requireCustomerId } from '../validation.js';
+import { tsvDocument } from './format.js';
 import {
   entitySchema,
   upperTokenSchema,
@@ -27,7 +28,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       }
       try {
         const accounts = await listAccounts(cfg);
-        return { content: [{ type: 'text', text: JSON.stringify(accounts, null, 2) }] };
+        return { content: [{ type: 'text', text: tsvDocument([['accounts', accounts as unknown[]]]) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -47,8 +48,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
         return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       }
       try {
-        const rows = await getCampaigns(cfg, normalizeCustomerId(customer_id), Number(days) as 7 | 30);
-        return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+        const cid = normalizeCustomerId(customer_id);
+        const rows = await getCampaigns(cfg, cid, Number(days) as 7 | 30);
+        return { content: [{ type: 'text', text: tsvDocument([['campaigns', rows as unknown[]]], [`# campaigns for customer ${cid}, last ${days}d`]) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -61,8 +63,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       query: z.string().describe('GAQL query (SELECT ... FROM ... WHERE ...)'),
+      format: z.enum(['tsv', 'json']).default('tsv').describe('tsv (default) is compact and decodes enum numbers to names; json returns the raw API rows and costs several times more context'),
     },
-    async ({ customer_id, query }) => {
+    async ({ customer_id, query, format }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) {
         return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
@@ -74,7 +77,8 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       }
       try {
         const rows = await executeGaql(cfg, normalizeCustomerId(customer_id), query);
-        return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+        if (format === 'json') return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+        return { content: [{ type: 'text', text: tsvDocument([['rows', rows as unknown[]]]) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -100,35 +104,37 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
           executeGaql(cfg, cid, `SELECT conversion_action.id, conversion_action.name, conversion_action.category, conversion_action.status FROM conversion_action WHERE conversion_action.status = 'ENABLED' LIMIT 100`) as Promise<any[]>,
           executeGaql(cfg, cid, `SELECT asset.id, asset.name, asset.type FROM asset WHERE asset.type = 'IMAGE' LIMIT 50`) as Promise<any[]>,
         ]);
-        const context = {
-          customer_id: cid,
-          campaigns: campaignRows.map((r) => ({
-            id: r.campaign?.id,
-            name: r.campaign?.name,
-            type: r.campaign?.advertising_channel_type,
-            status: r.campaign?.status,
-            bidding_strategy_type: r.campaign?.bidding_strategy_type,
-            budget_id: r.campaign_budget?.id,
-            budget_amount_micros: r.campaign_budget?.amount_micros,
-          })),
-          ad_groups: adGroupRows.map((r) => ({
-            id: r.ad_group?.id,
-            name: r.ad_group?.name,
-            campaign: r.ad_group?.campaign,
-            status: r.ad_group?.status,
-          })),
-          conversion_actions: conversionRows.map((r) => ({
-            id: r.conversion_action?.id,
-            name: r.conversion_action?.name,
-            category: r.conversion_action?.category,
-          })),
-          image_assets: assetRows.map((r) => ({
-            id: r.asset?.id,
-            name: r.asset?.name,
-            type: r.asset?.type,
-          })),
-        };
-        return { content: [{ type: 'text', text: JSON.stringify(context, null, 2) }] };
+        const document = tsvDocument(
+          [
+            ['campaigns', campaignRows.map((r) => ({
+              id: r.campaign?.id,
+              name: r.campaign?.name,
+              'campaign.advertising_channel_type': r.campaign?.advertising_channel_type,
+              'campaign.status': r.campaign?.status,
+              'campaign.bidding_strategy_type': r.campaign?.bidding_strategy_type,
+              budget_id: r.campaign_budget?.id,
+              budget_amount_micros: r.campaign_budget?.amount_micros,
+            }))],
+            ['ad_groups', adGroupRows.map((r) => ({
+              id: r.ad_group?.id,
+              name: r.ad_group?.name,
+              campaign_id: r.ad_group?.campaign,
+              'ad_group.status': r.ad_group?.status,
+            }))],
+            ['conversion_actions', conversionRows.map((r) => ({
+              id: r.conversion_action?.id,
+              name: r.conversion_action?.name,
+              'conversion_action.category': r.conversion_action?.category,
+            }))],
+            ['image_assets', assetRows.map((r) => ({
+              id: r.asset?.id,
+              name: r.asset?.name,
+              'asset.type': r.asset?.type,
+            }))],
+          ],
+          [`# build context for customer ${cid}`],
+        );
+        return { content: [{ type: 'text', text: document }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -157,14 +163,15 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       try {
         const query = buildListQuery(input);
         const rows = await executeGaql(cfg, normalizeCustomerId(input.customer_id), query);
+        const limit = normalizeLimit(input.limit);
+        const list = rows as unknown[];
+        const truncated = list.length >= limit
+          ? [`Returned ${list.length} row(s) at the limit of ${limit}; there may be more. Narrow with campaign_id / ad_group_id / status / name_contains, or raise limit (max 200).`]
+          : [];
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({
-              entity: input.entity,
-              limit: normalizeLimit(input.limit),
-              rows,
-            }, null, 2),
+            text: tsvDocument([[input.entity, list]], [`# ${input.entity} for customer ${normalizeCustomerId(input.customer_id)}`, ...truncated]),
           }],
         };
       } catch (err) {

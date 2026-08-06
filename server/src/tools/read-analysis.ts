@@ -34,6 +34,7 @@ import {
   type DisplayAudienceRow,
   type UserListRow,
 } from './analysis-helpers.js';
+import { toTsv } from './format.js';
 
 function report(name: string, customerId: string, extra: Record<string, unknown>) {
   const body: Record<string, unknown> = { report: name, customer_id: customerId, ...extra };
@@ -189,7 +190,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           campaigns_scanned: campaigns.length,
           ad_groups_scanned: adGroups.length,
           user_lists_attached: audience_coverage.length,
-          audience_coverage: trimmed.coverage,
+          audience_coverage_tsv: toTsv(trimmed.coverage),
           ...(trimmed.omitted
             ? { audience_coverage_note: `Showing the ${trimmed.coverage.length} lists most used by enabled campaigns; ${trimmed.omitted} further list(s) omitted from this table. All of them are still covered by findings.` }
             : {}),

@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.17.0
+
+Read tools returned pretty-printed JSON, which spends most of its bytes repeating
+key names once per row. Measured against a live 42-campaign account, the list-shaped
+read tools now return tab-separated tables instead — same data, a fraction of the context.
+
+### Changed
+- **`list_ads_entities`, `get_build_context`, `get_campaigns`, `list_accounts` and `execute_gaql` return TSV tables** with one header row per section. Ids are bare (the `customers/123/campaigns/456` prefix is dropped — it repeated once per row), enum numbers are decoded to names, and repeated text fields (ad headlines, descriptions) are joined with ` ~ `. Measured on the same live account:
+
+  | Tool | Before | After | |
+  | --- | --- | --- | --- |
+  | `list_ads_entities(ads)`, 50 rows | 16 150 tok | 2 715 tok | −83% |
+  | `list_ads_entities(ad_groups)` | 6 398 tok | 1 570 tok | −75% |
+  | `list_ads_entities(assets)` | 3 343 tok | 846 tok | −76% |
+  | `get_build_context` | 32 152 tok | 11 917 tok | −63% |
+  | `list_accounts` | 802 tok | 318 tok | −60% |
+  | `get_campaigns` | 647 tok | 311 tok | −52% |
+
+  `get_build_context` alone was spending a sixth of a 200k window on a single call — the tool that exists to *save* round-trips was the most expensive thing in the plugin.
+- `execute_gaql` takes `format: tsv | json` (default `tsv`). Pass `json` when you need the raw API rows.
+- Non-integer metrics are printed to 6 significant digits. A CTR of `0.12375415282392027` carried 19 characters of precision nobody uses; integers and `*_micros` values are never rounded.
+- `audience_coverage` in the Display diagnostics is a TSV table rather than an array of objects.
+- `list_ads_entities` says so when a result sits exactly at the limit, instead of silently looking complete.
+- The `safe_word` description is defined once on the shared schema. Thirty tools carried one wording and ten another, for the same field.
+
+### Notes on what was *not* done
+- **Trimming schema descriptions was measured and rejected.** The manifest is ~20 400 tokens for 62 tools, but only 4 151 of that is field descriptions across 328 fields (~47 chars each); the rest is Zod-to-JSON-Schema structure. Consolidating the most-repeated description saved 79 tokens — 0.4%. Cutting the longer ones would have cost real information, including the warnings that stop a caller from changing a bid the campaign's bidding strategy ignores.
+- Decoding enums makes some tables slightly *larger* (`SEARCH_STANDARD` is longer than `2`). That is a deliberate trade: 0.16.1 shipped precisely because raw enum numbers had been reaching users and the code itself.
+
 ## v0.16.1
 
 Everything here was found by running 0.16.0 against a live account. The tools worked;

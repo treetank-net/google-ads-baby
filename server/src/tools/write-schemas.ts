@@ -19,7 +19,8 @@ export const MAX_NEGATIVE_TOPICS_PER_MUTATION = 100;
 export const MAX_BID_MODIFIER = 5.0;
 export const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 export const safeWordSchema = z.string()
-  .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces');
+  .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces')
+  .describe('Random word you invent and show the user; they must repeat it to confirm');
 export const campaignRefSchema = z.object({
   campaign_id: z.string().describe('Campaign ID'),
   campaign_name: z.string().describe('Campaign name for preview'),

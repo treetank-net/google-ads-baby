@@ -38,7 +38,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       asset_name: z.string().min(1).max(255).describe('Name for the new image asset'),
       file_path: z.string().min(1).describe('Absolute or relative local file path'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_name, file_path, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -77,7 +77,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       asset_name: z.string().min(1).max(255).describe('Name for the new image asset'),
       image_url: z.string().url().describe('Public image URL'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_name, image_url, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -123,7 +123,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
         description2: z.string().max(35).default('').describe('Second description line, max 35 chars'),
         final_url: z.string().url().describe('Landing page URL for this sitelink'),
       })).min(1).max(20).describe('Sitelinks to create'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, sitelinks, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -152,7 +152,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       callouts: z.array(z.string().min(1).max(25)).min(1).max(20).describe('Callout texts, max 25 chars each'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, callouts, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -177,7 +177,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       country_code: z.string().min(2).max(2).describe('Two-letter country code, e.g. PL, US, DE'),
       phone_number: z.string().min(5).max(25).describe('Phone number in local or international format'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, country_code, phone_number, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -200,7 +200,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       header: z.string().min(1).describe('Snippet header — must be a predefined Google Ads header, e.g. "Brands", "Types", "Destinations", "Courses", "Services", "Styles", "Amenities"'),
       values: z.array(z.string().min(1).max(25)).min(3).max(10).describe('Snippet values, 3-10 items, max 25 chars each'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, header, values, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -227,7 +227,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_id: z.string().describe('Existing campaign ID'),
       assets: z.array(campaignAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the campaign'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, assets, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -268,7 +268,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       ad_group_id: z.string().describe('Existing ad group ID'),
       assets: z.array(adGroupAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the ad group'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, assets, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -314,7 +314,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
         asset_id: z.string().describe('Existing asset ID'),
         field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
       })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Existing assets to link while creating the asset group. PMax requires core creative assets at creation time.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, asset_group_name, final_urls, assets, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -369,7 +369,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
         asset_id: z.string().describe('Existing asset ID'),
         field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
       })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Assets to link to the asset group'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, assets, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -413,7 +413,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       asset_group_id: z.string().describe('Existing asset group ID'),
       signals: z.array(assetGroupSignalSchema).min(1).max(MAX_ASSET_GROUP_SIGNALS_PER_MUTATION).describe('Signals to link to the asset group. Supported types: SEARCH_THEME and AUDIENCE.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, signals, safe_word }) => {
       const customerError = validateCustomer(customer_id);
@@ -457,7 +457,7 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       asset_group_id: z.string().describe('Existing asset group ID'),
       nodes: z.array(listingGroupNodeSchema).min(2).max(MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION).describe('Tree nodes in parent-first order. Node 0 must be the root subdivision.'),
-      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+      safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, nodes, safe_word }) => {
       const customerError = validateCustomer(customer_id);

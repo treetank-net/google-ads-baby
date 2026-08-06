@@ -39,6 +39,7 @@ import {
   MICROS,
 } from '../src/tools/analysis-helpers.js';
 import { enums } from 'google-ads-api';
+import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision } from '../src/tools/format.js';
 
 let passed = 0;
 let failed = 0;
@@ -312,6 +313,55 @@ async function testCapEnforcement() {
   console.log(`  checked ${checked} money field(s); exempt: ${skipped.length ? skipped.join(', ') : 'none'}`);
 }
 
+function testFormat() {
+  console.log('\n--- Compact TSV output ---');
+
+  const rows = [
+    { campaign: { resource_name: 'customers/1/campaigns/10', id: 10, name: 'CZ | TFC | LMT | DISPLAY', status: 3, advertising_channel_type: 3 } },
+    { campaign: { resource_name: 'customers/1/campaigns/11', id: 11, name: 'Healthy', status: 2, advertising_channel_type: 2 } },
+  ];
+  const tsv = toTsv(rows);
+  const lines = tsv.split('\n');
+  assert('tsv writes the header once', lines.length === 3);
+  assert('tsv drops resource_name', !tsv.includes('resource_name') && !tsv.includes('customers/1/campaigns'));
+  assert('tsv decodes campaign status', lines[1].includes('PAUSED') && lines[2].includes('ENABLED'));
+  assert('tsv decodes channel type', lines[1].includes('DISPLAY') && lines[2].includes('SEARCH'));
+  assert('tsv keeps pipes in names intact', lines[1].includes('CZ | TFC | LMT | DISPLAY'));
+  assert('tsv is smaller than json', tsv.length < JSON.stringify(rows, null, 2).length);
+
+  const refs = toTsv([{ ad_group: { id: 5, campaign: 'customers/1/campaigns/10' } }]);
+  assert('tsv shortens a resource reference to its id', refs.split('\n')[1] === '5\t10');
+
+  const creative = toTsv([{
+    ad_group_ad: {
+      ad: { id: 7, type: 19, final_urls: ['https://a.example/x'], responsive_display_ad: { headlines: [{ text: 'One' }, { text: 'Two' }] } },
+    },
+  }]);
+  assert('tsv joins repeated text fields', creative.includes('One ~ Two'));
+  assert('tsv decodes ad type', creative.includes('RESPONSIVE_DISPLAY_AD'));
+
+  const messy = toTsv([{ campaign: { id: 1, name: 'has\ta tab\nand a newline' } }]);
+  assert('tsv neutralises tabs and newlines inside values', messy.split('\n').length === 2 && messy.split('\n')[1] === '1\thas a tab and a newline');
+
+  const sparse = toTsv([{ a: 1 }, { b: 2 }]);
+  assert('tsv unions columns across rows', sparse.split('\n')[0] === 'a\tb' && sparse.split('\n')[2] === '\t2');
+
+  assert('empty input yields no table', toTsv([]) === '');
+  assert('tsvDocument labels an empty section', tsvDocument([['ads', []]]).includes('## ads (0)'));
+  const doc = tsvDocument([['campaigns', rows]], ['# header']);
+  assert('tsvDocument keeps the header and explains the format', doc.startsWith('# header') && doc.includes('tab-separated'));
+
+  assert('unknown enum columns are left alone', decodeCell('campaign.some_future_field', 7) === 7);
+  assert('an out-of-range enum keeps its number', decodeCell('campaign.status', 999) === 999);
+  assert('already-decoded names pass through', decodeCell('campaign.status', 'ENABLED') === 'ENABLED');
+  assert('non-resource strings are untouched', shortenResourceName('Transport CPM') === 'Transport CPM');
+
+  assert('float precision is trimmed to what is meaningful', trimPrecision(0.12375415282392027) === 0.123754);
+  assert('integers keep every digit', trimPrecision(624362494) === 624362494);
+  assert('micros are never rounded', toTsv([{ metrics: { cost_micros: 624362494, ctr: 0.024426496464442234 } }]).split('\n')[1] === '624362494\t0.0244265');
+  assert('small floats survive trimming', trimPrecision(0.0000123456789) === 0.0000123457);
+}
+
 function displayTaskStub() {
   return { title: 't', intent: 'i', suggested_workflow: 'w', source_type: 'review' as const, reason: 'r' };
 }
@@ -475,6 +525,7 @@ async function main() {
   await testSaveLoadConfig();
   await testAuthFlow();
   testAnalysis();
+  testFormat();
   testDisplayRemarketing();
   testLimitHelpers();
   testToolContract();
