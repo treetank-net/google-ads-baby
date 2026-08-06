@@ -8,13 +8,19 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerWriteTools } from '../src/tools/write.js';
 import { updatedFieldNames } from '../src/history.js';
 import {
-  MAX_BUDGET_MICROS,
-  MAX_CPC_MICROS,
-  MAX_TARGET_CPA_MICROS,
-} from '../src/tools/write-schemas.js';
+  resolveAmountLimits,
+  currencyUnitScale,
+  formatAmount,
+  formatUnits,
+  CURRENCY_UNIT_SCALE,
+  DEFAULT_MAX_BUDGET_UNITS,
+  DEFAULT_MAX_CPC_UNITS,
+  DEFAULT_MAX_TARGET_CPA_UNITS,
+  MICROS_PER_UNIT,
+} from '../src/tools/amounts.js';
 import {
-  PLN_FIELD_LIMITS,
-  plnFieldLimitError,
+  AMOUNT_FIELD_LIMITS,
+  amountFieldLimitError,
   budgetLimitError,
   cpcLimitError,
   targetCpaLimitError,
@@ -35,6 +41,9 @@ import {
   sortFindings,
   enumLabel,
   windowClause,
+  scaleUnitThresholds,
+  HYGIENE_DEFAULTS,
+  DISPLAY_REMARKETING_DEFAULTS,
   MICROS,
 } from '../src/tools/analysis-helpers.js';
 import { enums } from 'google-ads-api';
@@ -185,7 +194,7 @@ function testAnalysis() {
 
 // Fields that carry an amount for preview only and never reach a mutation,
 // so a safety cap on them would be meaningless.
-const CAP_SWEEP_EXEMPT = new Set(['prepare_budget_change.current_budget_pln']);
+const CAP_SWEEP_EXEMPT = new Set(['prepare_budget_change.current_budget_amount']);
 
 const SMOKE_CFG = {
   clientId: '',
@@ -276,30 +285,94 @@ function resultText(result: any): string {
   return String(result?.content?.[0]?.text ?? '');
 }
 
+function testAccountCurrency() {
+  console.log('\n--- Account currency and configurable caps ---');
+
+  const pln = resolveAmountLimits(SMOKE_CFG, 'PLN');
+  assert('PLN keeps the historical caps', pln.budgetMicros === DEFAULT_MAX_BUDGET_UNITS * MICROS_PER_UNIT
+    && pln.cpcMicros === DEFAULT_MAX_CPC_UNITS * MICROS_PER_UNIT
+    && pln.targetCpaMicros === DEFAULT_MAX_TARGET_CPA_UNITS * MICROS_PER_UNIT);
+
+  const eur = resolveAmountLimits(SMOKE_CFG, 'EUR');
+  assert('EUR cap is a quarter of the PLN cap', eur.budgetMicros === 125 * MICROS_PER_UNIT);
+  const huf = resolveAmountLimits(SMOKE_CFG, 'HUF');
+  assert('HUF cap scales up so it is not ~5 PLN', huf.budgetMicros === 50_000 * MICROS_PER_UNIT);
+  const czk = resolveAmountLimits(SMOKE_CFG, 'CZK');
+  assert('CZK cap scales up', czk.budgetMicros === 2_500 * MICROS_PER_UNIT);
+
+  assert('currency code is case-insensitive', currencyUnitScale('eur') === currencyUnitScale('EUR'));
+  assert('an unknown currency falls back to the strictest scale', currencyUnitScale('JPY') === 1);
+  assert('every scale in the table is positive', Object.values(CURRENCY_UNIT_SCALE).every((s) => s > 0));
+
+  const unknownCurrency = resolveAmountLimits(SMOKE_CFG, '');
+  assert('an unreadable currency still caps at the default units', unknownCurrency.budgetMicros === DEFAULT_MAX_BUDGET_UNITS * MICROS_PER_UNIT);
+  assert('an unreadable currency is not faked as PLN', unknownCurrency.currency === '');
+  assert('amounts without a currency say so instead of lying', formatAmount(500_000_000, '').includes('account currency unit'));
+  assert('amounts with a currency name it', formatAmount(500_000_000, 'EUR') === '500 EUR');
+  assert('fractional amounts keep two decimals', formatAmount(1_230_000, 'CZK') === '1.23 CZK');
+
+  const configured = resolveAmountLimits({ ...SMOKE_CFG, maxDailyBudgetUnits: '80', maxCpcUnits: '5' }, 'EUR');
+  assert('a configured budget cap wins over the currency default', configured.budgetMicros === 80 * MICROS_PER_UNIT);
+  assert('a configured CPC cap wins over the currency default', configured.cpcMicros === 5 * MICROS_PER_UNIT);
+  assert('an unconfigured cap still scales by currency', configured.targetCpaMicros === 125 * MICROS_PER_UNIT);
+  const garbage = resolveAmountLimits({ ...SMOKE_CFG, maxDailyBudgetUnits: 'unlimited' }, 'PLN');
+  assert('a nonsense cap override is ignored, not treated as zero', garbage.budgetMicros === DEFAULT_MAX_BUDGET_UNITS * MICROS_PER_UNIT);
+  const negative = resolveAmountLimits({ ...SMOKE_CFG, maxDailyBudgetUnits: '-10' }, 'PLN');
+  assert('a negative cap override is ignored', negative.budgetMicros === DEFAULT_MAX_BUDGET_UNITS * MICROS_PER_UNIT);
+
+  assert('the limit message names the account currency', (budgetLimitError(900, eur) ?? '').includes('EUR'));
+  assert('the limit message no longer hardcodes PLN', !(budgetLimitError(900, eur) ?? '').includes('PLN'));
+  assert('an amount within the local cap passes', budgetLimitError(100, eur) === null);
+  assert('an amount over the local cap is rejected', (budgetLimitError(200, eur) ?? '').includes('safety limit'));
+  assert('units render without a currency when it is unknown', formatUnits(12.5, '').includes('account currency unit'));
+
+  // Diagnostic thresholds are money too: a PLN-tuned floor of 50 is ~0.5 PLN on a
+  // HUF account, which would flag every campaign that ever spent anything.
+  const hufThresholds = scaleUnitThresholds(HYGIENE_DEFAULTS, currencyUnitScale('HUF'));
+  assert('cost thresholds scale with the currency', hufThresholds.noConvCostFloorUnits === 5_000);
+  assert('ratio thresholds are left alone', hufThresholds.lowUtil === HYGIENE_DEFAULTS.lowUtil);
+  const displayHuf = scaleUnitThresholds(DISPLAY_REMARKETING_DEFAULTS, currencyUnitScale('HUF'));
+  assert('the low-CPC floor scales with the currency', displayHuf.lowCpcUnits === 10);
+  assert('audience size is not a money threshold', displayHuf.minDisplayListSize === DISPLAY_REMARKETING_DEFAULTS.minDisplayListSize);
+  assert('membership days are not a money threshold', displayHuf.shortMembershipDays === DISPLAY_REMARKETING_DEFAULTS.shortMembershipDays);
+  assert('a PLN account keeps the original threshold object', scaleUnitThresholds(HYGIENE_DEFAULTS, 1) === HYGIENE_DEFAULTS);
+
+  const smallHufSpend = [{ campaign: { id: 1, name: 'HU low spend' }, campaign_budget: { amount_micros: 20_000 * MICROS }, metrics: { cost_micros: 300 * MICROS, conversions: 0 } }];
+  assert('a trivial HUF spend is not flagged as wasteful',
+    !analyzeAccountHygiene(smallHufSpend, 30, hufThresholds).some((f) => f.code === 'spend_no_conversions'));
+  assert('the same amount in PLN is flagged as wasteful',
+    analyzeAccountHygiene(smallHufSpend, 30).some((f) => f.code === 'spend_no_conversions'));
+}
+
 function testLimitHelpers() {
   console.log('\n--- Mutation limit helpers ---');
 
-  assert('budget at the cap is allowed', budgetLimitError(MAX_BUDGET_MICROS / 1_000_000) === null);
-  assert('budget above the cap is rejected', (budgetLimitError(MAX_BUDGET_MICROS / 1_000_000 + 1) ?? '').includes('safety limit'));
-  assert('CPC at the cap is allowed', cpcLimitError(MAX_CPC_MICROS / 1_000_000) === null);
-  assert('CPC above the cap is rejected', (cpcLimitError(MAX_CPC_MICROS / 1_000_000 + 0.01) ?? '').includes('safety limit'));
-  assert('target CPA at the cap is allowed', targetCpaLimitError(MAX_TARGET_CPA_MICROS / 1_000_000) === null);
-  assert('target CPA above the cap is rejected', (targetCpaLimitError(MAX_TARGET_CPA_MICROS / 1_000_000 + 1) ?? '').includes('safety limit'));
+  const limits = resolveAmountLimits(SMOKE_CFG, 'PLN');
+  assert('budget at the cap is allowed', budgetLimitError(limits.budgetMicros / MICROS_PER_UNIT, limits) === null);
+  assert('budget above the cap is rejected', (budgetLimitError(limits.budgetMicros / MICROS_PER_UNIT + 1, limits) ?? '').includes('safety limit'));
+  assert('CPC at the cap is allowed', cpcLimitError(limits.cpcMicros / MICROS_PER_UNIT, limits) === null);
+  assert('CPC above the cap is rejected', (cpcLimitError(limits.cpcMicros / MICROS_PER_UNIT + 0.01, limits) ?? '').includes('safety limit'));
+  assert('target CPA at the cap is allowed', targetCpaLimitError(limits.targetCpaMicros / MICROS_PER_UNIT, limits) === null);
+  assert('target CPA above the cap is rejected', (targetCpaLimitError(limits.targetCpaMicros / MICROS_PER_UNIT + 1, limits) ?? '').includes('safety limit'));
 
   // Nested payloads (the *_full tools) must be walked, not just top-level fields.
-  const nested = { customer_id: '1', daily_budget_pln: 100, ad_groups: [{ name: 'a', cpc_bid_pln: 2 }, { name: 'b', cpc_bid_pln: 9999 }] };
-  const nestedError = plnFieldLimitError(nested) ?? '';
-  assert('nested cpc_bid_pln over the cap is caught', nestedError.includes('safety limit'));
-  assert('nested error names the offending path', nestedError.includes('ad_groups[1].cpc_bid_pln'));
-  assert('clean nested payload passes', plnFieldLimitError({ daily_budget_pln: 10, ad_groups: [{ cpc_bid_pln: 3 }] }) === null);
-  assert('deeply nested bidding target is caught', (plnFieldLimitError({ bidding: { target_cpa_pln: 100000 } }) ?? '').includes('Target CPA'));
+  const nested = { customer_id: '1', daily_budget_amount: 100, ad_groups: [{ name: 'a', cpc_bid_amount: 2 }, { name: 'b', cpc_bid_amount: 9999 }] };
+  const nestedError = amountFieldLimitError(nested, limits) ?? '';
+  assert('nested cpc_bid_amount over the cap is caught', nestedError.includes('safety limit'));
+  assert('nested error names the offending path', nestedError.includes('ad_groups[1].cpc_bid_amount'));
+  assert('clean nested payload passes', amountFieldLimitError({ daily_budget_amount: 10, ad_groups: [{ cpc_bid_amount: 3 }] }, limits) === null);
+  assert('deeply nested bidding target is caught', (amountFieldLimitError({ bidding: { target_cpa_amount: 100000 } }, limits) ?? '').includes('Target CPA'));
+  const czkLimits = resolveAmountLimits(SMOKE_CFG, 'CZK');
+  assert('a nested amount legal on a CZK account is not rejected', amountFieldLimitError({ daily_budget_amount: 1_500 }, czkLimits) === null);
+  assert('the same nested amount is rejected on a PLN account', (amountFieldLimitError({ daily_budget_amount: 1_500 }, limits) ?? '').includes('safety limit'));
 
   assert('before -> after keeps both values', changeLine('Status', 'PAUSED', 'ENABLED') === 'Status: PAUSED → ENABLED');
   assert('missing previous value is explicit', changeLine('Name', undefined, 'x').includes('(not set)'));
-  assert('12x bid increase is called out', microsChangeLine('Max CPC', 200_000, 2_500_000).includes('12.5x more'));
-  assert('halving is called out as less', microsChangeLine('Max CPC', 2_000_000, 500_000).includes('4.0x less'));
-  assert('small change shows percent', microsChangeLine('Daily budget', 100_000_000, 110_000_000).includes('+10%'));
-  assert('unknown previous amount degrades gracefully', microsChangeLine('Max CPC', undefined, 1_000_000).includes('(not set)'));
+  assert('12x bid increase is called out', microsChangeLine('Max CPC', 200_000, 2_500_000, 'PLN').includes('12.5x more'));
+  assert('halving is called out as less', microsChangeLine('Max CPC', 2_000_000, 500_000, 'PLN').includes('4.0x less'));
+  assert('small change shows percent', microsChangeLine('Daily budget', 100_000_000, 110_000_000, 'PLN').includes('+10%'));
+  assert('unknown previous amount degrades gracefully', microsChangeLine('Max CPC', undefined, 1_000_000, 'PLN').includes('(not set)'));
+  assert('before -> after carries the account currency', microsChangeLine('Daily budget', 40_000_000, 60_000_000, 'CZK').includes('CZK'));
 
   assert('manual CPC needs no bidding warning', manualBiddingRequiredWarning('MANUAL_CPC') === null);
   assert('enhanced CPC honours ad group bids, so no warning', manualBiddingRequiredWarning('ENHANCED_CPC') === null);
@@ -331,24 +404,24 @@ function testToolContract() {
   // Every field a create tool sets must have an update path, or the plugin can
   // create state it cannot fix (the gap this release closes).
   const adGroupUpdateFields = toolFieldNames(tools['prepare_ad_group_update']);
-  for (const [createField, updateField] of [['cpc_bid_pln', 'cpc_bid_pln'], ['ad_group_name', 'name'], ['optimized_targeting_enabled', 'optimized_targeting_enabled']]) {
+  for (const [createField, updateField] of [['cpc_bid_amount', 'cpc_bid_amount'], ['ad_group_name', 'name'], ['optimized_targeting_enabled', 'optimized_targeting_enabled']]) {
     assert(`ad group create field ${createField} has an update path`, adGroupUpdateFields.includes(updateField));
   }
   const campaignUpdateFields = toolFieldNames(tools['prepare_campaign_update']);
-  for (const [createField, updateField] of [['campaign_name', 'name'], ['daily_budget_pln', 'daily_budget_pln'], ['status', 'status']]) {
+  for (const [createField, updateField] of [['campaign_name', 'name'], ['daily_budget_amount', 'daily_budget_amount'], ['status', 'status']]) {
     assert(`campaign create field ${createField} has an update path`, campaignUpdateFields.includes(updateField));
   }
 
-  // Any *_pln field must match a known limit rule; a field that only hits the
+  // Any *_amount field must match a known limit rule; a field that only hits the
   // fallback is a cap waiting to be forgotten.
   const unmatched: string[] = [];
   for (const [toolName, tool] of Object.entries(tools)) {
     for (const field of toolFieldNames(tool)) {
-      if (!field.endsWith('_pln')) continue;
-      if (!PLN_FIELD_LIMITS.some((rule) => rule.match.test(field))) unmatched.push(`${toolName}.${field}`);
+      if (!field.endsWith('_amount')) continue;
+      if (!AMOUNT_FIELD_LIMITS.some((rule) => rule.match.test(field))) unmatched.push(`${toolName}.${field}`);
     }
   }
-  assert('every *_pln field maps to a limit rule', unmatched.length === 0, unmatched.join(', '));
+  assert('every *_amount field maps to a limit rule', unmatched.length === 0, unmatched.join(', '));
 }
 
 async function testCapEnforcement() {
@@ -360,7 +433,7 @@ async function testCapEnforcement() {
 
   for (const [toolName, tool] of Object.entries(tools)) {
     for (const field of toolFieldNames(tool)) {
-      if (!field.endsWith('_pln')) continue;
+      if (!field.endsWith('_amount')) continue;
       const key = `${toolName}.${field}`;
       if (CAP_SWEEP_EXEMPT.has(key)) {
         skipped.push(key);
@@ -370,7 +443,7 @@ async function testCapEnforcement() {
       if (toolFieldNames(tool).includes('campaign_id')) args['campaign_id'] = '1';
       if (toolFieldNames(tool).includes('ad_group_id')) args['ad_group_id'] = '1';
       if (toolFieldNames(tool).includes('budget_id')) args['budget_id'] = '1';
-      if (field === 'target_cpa_pln') args['strategy_type'] = 'TARGET_CPA';
+      if (field === 'target_cpa_amount') args['strategy_type'] = 'TARGET_CPA';
       let text = '';
       try {
         text = resultText(await tool.handler(args, {}));
@@ -647,6 +720,7 @@ async function main() {
   testPagination();
   testProfiles();
   testDisplayRemarketing();
+  testAccountCurrency();
   testLimitHelpers();
   testToolContract();
   await testCapEnforcement();

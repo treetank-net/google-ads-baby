@@ -5,53 +5,57 @@ import { createToken, getTokenTtlSeconds } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 import {
   MAX_IMAGE_BYTES,
-  MAX_BUDGET_MICROS,
-  MAX_CPC_MICROS,
-  MAX_TARGET_CPA_MICROS,
   CODEX_HOOK_INSTALL_COMMAND,
 } from './write-schemas.js';
+import {
+  type AmountLimits,
+  amountToMicros,
+  formatAmount,
+  formatUnits,
+} from './amounts.js';
+
+export {
+  type AmountLimits,
+  amountToMicros,
+  formatAmount,
+  formatUnits,
+  loadAmountLimits,
+  resolveAmountLimits,
+  amountFieldDescription,
+} from './amounts.js';
 
 export function validationResult(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }] };
 }
 
-export function plnToMicros(pln: number): number {
-  return Math.round(pln * 1_000_000);
-}
-
-export function formatPln(micros: number | undefined | null): string {
-  if (micros === undefined || micros === null) return '(not set)';
-  return `${(micros / 1_000_000).toFixed(2)} PLN`;
-}
-
-export function budgetLimitError(pln: number): string | null {
-  return plnToMicros(pln) > MAX_BUDGET_MICROS
-    ? `Budget ${pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`
+function limitError(label: string, units: number, maxMicros: number, currency: string, per = ''): string | null {
+  return amountToMicros(units) > maxMicros
+    ? `${label} ${formatUnits(units, currency)} exceeds the safety limit (${formatAmount(maxMicros, currency)}${per}).`
     : null;
 }
 
-export function cpcLimitError(pln: number): string | null {
-  return plnToMicros(pln) > MAX_CPC_MICROS
-    ? `CPC bid ${pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`
-    : null;
+export function budgetLimitError(units: number, limits: AmountLimits): string | null {
+  return limitError('Budget', units, limits.budgetMicros, limits.currency, '/day');
 }
 
-export function targetCpaLimitError(pln: number): string | null {
-  return plnToMicros(pln) > MAX_TARGET_CPA_MICROS
-    ? `Target CPA ${pln} PLN exceeds the safety limit (${MAX_TARGET_CPA_MICROS / 1_000_000} PLN).`
-    : null;
+export function cpcLimitError(units: number, limits: AmountLimits): string | null {
+  return limitError('CPC bid', units, limits.cpcMicros, limits.currency);
 }
 
-export const PLN_FIELD_LIMITS: Array<{ match: RegExp; maxMicros: number; label: string }> = [
-  { match: /cpc/, maxMicros: MAX_CPC_MICROS, label: 'CPC bid' },
-  { match: /cpa/, maxMicros: MAX_TARGET_CPA_MICROS, label: 'Target CPA' },
-  { match: /budget/, maxMicros: MAX_BUDGET_MICROS, label: 'Budget' },
+export function targetCpaLimitError(units: number, limits: AmountLimits): string | null {
+  return limitError('Target CPA', units, limits.targetCpaMicros, limits.currency);
+}
+
+export const AMOUNT_FIELD_LIMITS: Array<{ match: RegExp; label: string; maxMicros: (limits: AmountLimits) => number }> = [
+  { match: /cpc/, label: 'CPC bid', maxMicros: (limits) => limits.cpcMicros },
+  { match: /cpa/, label: 'Target CPA', maxMicros: (limits) => limits.targetCpaMicros },
+  { match: /budget/, label: 'Budget', maxMicros: (limits) => limits.budgetMicros },
 ];
 
-export function plnFieldLimitError(value: unknown, path = ''): string | null {
+export function amountFieldLimitError(value: unknown, limits: AmountLimits, path = ''): string | null {
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      const error = plnFieldLimitError(value[index], `${path}[${index}]`);
+      const error = amountFieldLimitError(value[index], limits, `${path}[${index}]`);
       if (error) return error;
     }
     return null;
@@ -59,15 +63,16 @@ export function plnFieldLimitError(value: unknown, path = ''): string | null {
   if (!value || typeof value !== 'object') return null;
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const fieldPath = path ? `${path}.${key}` : key;
-    if (key.endsWith('_pln') && typeof item === 'number') {
-      const rule = PLN_FIELD_LIMITS.find((candidate) => candidate.match.test(key))
-        ?? { maxMicros: MAX_BUDGET_MICROS, label: 'Amount' };
-      if (plnToMicros(item) > rule.maxMicros) {
-        return `${rule.label} ${item} PLN in ${fieldPath} exceeds the safety limit (${rule.maxMicros / 1_000_000} PLN).`;
+    if (key.endsWith('_amount') && typeof item === 'number') {
+      const rule = AMOUNT_FIELD_LIMITS.find((candidate) => candidate.match.test(key))
+        ?? { label: 'Amount', maxMicros: (l: AmountLimits) => l.budgetMicros };
+      const maxMicros = rule.maxMicros(limits);
+      if (amountToMicros(item) > maxMicros) {
+        return `${rule.label} ${formatUnits(item, limits.currency)} in ${fieldPath} exceeds the safety limit (${formatAmount(maxMicros, limits.currency)}).`;
       }
       continue;
     }
-    const error = plnFieldLimitError(item, fieldPath);
+    const error = amountFieldLimitError(item, limits, fieldPath);
     if (error) return error;
   }
   return null;
@@ -78,8 +83,8 @@ export function changeLine(label: string, before: unknown, after: unknown): stri
   return `${label}: ${from} → ${String(after)}`;
 }
 
-export function microsChangeLine(label: string, beforeMicros: number | undefined, afterMicros: number): string {
-  const base = `${label}: ${formatPln(beforeMicros)} → ${formatPln(afterMicros)}`;
+export function microsChangeLine(label: string, beforeMicros: number | undefined, afterMicros: number, currency: string): string {
+  const base = `${label}: ${formatAmount(beforeMicros, currency)} → ${formatAmount(afterMicros, currency)}`;
   if (!beforeMicros || beforeMicros <= 0) return base;
   const factor = afterMicros / beforeMicros;
   if (factor >= 1.5) return `${base} (${factor.toFixed(1)}x more)`;

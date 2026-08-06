@@ -27,6 +27,7 @@ async function main() {
         'Each prepare_* returns a preview and an LLM-invented safe word: show the full preview to the user and ask them to reply with the safe word before calling confirm_mutation / confirm_all_mutations. Never call prepare_* and confirm in the same turn.',
       ]),
       'List-shaped read tools return tab-separated tables and are paginated by response size: the response says which page of how many, and page: N asks for the next slice. Nothing is silently dropped.',
+      'Every *_amount field and every amount in a preview or report is in the account currency, never converted — list_accounts shows each account currency, and analysis reports repeat it. Safety caps and diagnostic cost thresholds are scaled to that currency, so the same number means different things on a PLN and a HUF account. Never state an amount in a currency the account does not use.',
     ].join(' '),
   });
 

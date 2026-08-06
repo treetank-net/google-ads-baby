@@ -55,8 +55,9 @@ export function summarize(findings: Finding[]): Record<Severity, number> {
 
 // Thresholds mirror BDOS DAILY_DEFAULTS / MONTHLY_DEFAULTS and the
 // google-ads-daily-check / google-ads-monthly-review knowledge workflows.
-// Amounts are in account currency units (tuned for PLN accounts); override
-// per call where the tool exposes a parameter.
+// The *Units fields are amounts, tuned for PLN, and scaled to the account
+// currency by scaleUnitThresholds() before an analyzer sees them. Ratios and
+// day counts carry no suffix and are never scaled.
 export const HYGIENE_DEFAULTS = {
   lowUtil: 0.2, // budget utilization below this is a low-util flag
   minDailyBudgetUnits: 20, // ignore trivial budgets for low-util
@@ -64,6 +65,15 @@ export const HYGIENE_DEFAULTS = {
   zeroSpendCostFloorUnits: 1, // spend at or below this counts as "no spend"
   noConvCostFloorUnits: 50, // spend at or above this with 0 conversions is wasteful
 };
+
+export function scaleUnitThresholds<T extends Record<string, number>>(defaults: T, scale: number): T {
+  if (scale === 1) return defaults;
+  const scaled: Record<string, number> = { ...defaults };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (key.endsWith('Units')) scaled[key] = Number((value * scale).toFixed(2));
+  }
+  return scaled as T;
+}
 
 export const SCALING_DEFAULTS = {
   minUtil: 0.9, // budget utilization at or above this = budget-constrained

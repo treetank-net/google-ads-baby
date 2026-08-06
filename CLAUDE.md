@@ -24,7 +24,7 @@ constants.ts              — współdzielone stałe + PLUGIN_VERSION (pilnowany
 client.ts                 — barrel re-export z client/
 
 client/
-  core.ts                 — getCustomer(), listAccounts(), getCampaigns(), executeGaql()
+  core.ts                 — getCustomer(), listAccounts(), getAccountCurrency() (cache per konto), getCampaigns(), executeGaql()
   campaigns.ts            — campaign CRUD, ad group create, targeting, bidding, demographics, conversion goals, shared sets, ad schedules
   ads.ts                  — responsive search/display ad, keywords, negative keywords, keyword/ad status changes
   assets.ts               — asset groups, extensions, sitelinks, callouts, image upload, linking
@@ -32,15 +32,16 @@ client/
 
 tools/
   profile.ts              — GOOGLE_ADS_BABY_PROFILE: TOOL_PROFILE map, withProfile() gate, profileNotice()
+  amounts.ts              — waluta i kwoty: CURRENCY_UNIT_SCALE, resolveAmountLimits()/loadAmountLimits(), formatAmount()/formatUnits(), amountToMicros(), konfigurowalne capy
   auth.ts                 — OAuth flow (auth_google_ads, setup_google_auth)
   read.ts                 — orchestrator: registerReadTools()
   read-helpers.ts         — schemas, query builders, pure functions
   read-accounts.ts        — list_accounts, get_campaigns, execute_gaql, list_ads_entities, get_ad_blueprint
   read-analysis.ts        — read-only review loops: get_account_hygiene_report, get_budget_scaling_candidates, get_search_terms_waste_candidates, get_pmax_channel_breakdown, get_display_remarketing_diagnostics
-  analysis-helpers.ts     — thresholds (BDOS DAILY/MONTHLY_DEFAULTS), GAQL query builders, and pure analyzer functions for read-analysis.ts (unit-tested in smoke)
+  analysis-helpers.ts     — thresholds (BDOS DAILY/MONTHLY_DEFAULTS), scaleUnitThresholds(), GAQL query builders, and pure analyzer functions for read-analysis.ts (unit-tested in smoke)
   read-history.ts         — get_mutation_history, get_mutation_stats
   write.ts                — orchestrator: registerWriteTools()
-  write-schemas.ts        — Zod schemas, safety constants (budget caps, limits)
+  write-schemas.ts        — Zod schemas, niekwotowe limity (liczności, rozmiar obrazka, bid modifier); capy kwotowe siedzą w amounts.ts
   write-helpers.ts        — validation, image inspection, preview formatting
   write-executor.ts       — executeMutation() dispatcher, formatMutationError()
   write-prepare-campaigns.ts — prepare_campaign_status, prepare_campaign_update, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_ad_group, prepare_ad_group_update, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
@@ -127,9 +128,23 @@ kampanii na kontach klienta zawierają `|`). Nowa kolumna enumowa musi trafić d
 inaczej model zobaczy liczbę. JSON zostaje dla struktur **semantycznych**, nie tabelarycznych:
 `findings`, `preview`, `get_ad_blueprint`.
 
+**Kwoty tylko w walucie konta — nigdy „PLN" na sztywno:**
+Micros z Google Ads są w walucie konta, a MCC ma konta w EUR/CZK/HUF. Zahardkodowane „500 PLN"
+w komunikacie capa było nieprawdziwe na każdym koncie poza polskim (cap 500 na HUF ≈ 5 zł, na EUR
+≈ 2100 zł). Dlatego: **żaden string nie zawiera nazwy waluty na sztywno**. Kwota do preview czy
+findings idzie przez `formatAmount(micros, currency)` / `formatUnits(units, currency)`
+(`tools/amounts.ts`), a walutę handler bierze z `loadAmountLimits(cfg, customerId)` (write) albo
+`getAccountCurrency(cfg, customerId)` (read). Gdy waluty nie da się odczytać, helpery mówią
+„account currency unit(s)" — **nie** podstawiają PLN. Nowe pole kwotowe nazywa się `*_amount`
+(nie `*_pln`), bo tylko ten sufiks łapie sweep capów w smoke. Progi diagnostyczne to też kwoty:
+w `analysis-helpers.ts` nazwa kończy się na `Units` i `scaleUnitThresholds()` przemnaża je przez
+`CURRENCY_UNIT_SCALE`; proporcje i liczby dni **nie** mają tego sufiksu i nie są skalowane. Skala
+jest przybliżeniem rzędu wielkości waluty, nie kursem — jej zadaniem jest, żeby cap i próg znaczyły
+podobną ilość pieniędzy, nie żeby przeliczać wartość.
+
 **Konwencje:**
 - Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
-- Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `plnFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_pln` wg reguł `PLN_FIELD_LIMITS`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_pln` z absurdalną kwotą, więc pominięty limit oblewa testy.
+- Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `amountFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_amount` wg reguł `AMOUNT_FIELD_LIMITS`. Każdy z nich przyjmuje `AmountLimits` — handler musi najpierw zrobić `const limits = await loadAmountLimits(cfg, normalizedCustomerId)`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_amount` z absurdalną kwotą, więc pominięty limit oblewa testy.
 - Customer ID normalizacja: `normalizeCustomerId()` + `validateCustomer()` na początku każdego handlera
 - Nie dodawaj komentarzy w kodzie — nazwy funkcji/zmiennych muszą być samodokumentujące
 
@@ -200,12 +215,13 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
-- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 62 tools), `manage` (38 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 248 to 10 352 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
+- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 62 tools), `manage` (38 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
+- `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` — capy w jednostkach waluty konta. Ustawione = brane dosłownie (bez skalowania). Nieustawione = domyślne 500/50/500 przemnożone przez `CURRENCY_UNIT_SCALE`.
 
 ## Safety Guardrails
-- Budget cap: 500 PLN/day max (configurable in `tools/write-schemas.ts`)
+- Budget cap: 500 jednostek waluty konta/dzień na PLN, skalowane per waluta (`CURRENCY_UNIT_SCALE` w `tools/amounts.ts`), nadpisywalne przez `GOOGLE_ADS_MAX_DAILY_BUDGET`
 - GAQL mutations blocked in `execute_gaql` tool
 - Token: one-shot, 1h expiry by default, server-side only
 - Safety level:
@@ -303,9 +319,9 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 - [x] Diagnostyka dostarczania Display/remarketing — `get_display_remarketing_diagnostics`: serving_status, brak podłączonej listy, rozmiar listy vs ~100 użytkowników wymaganych przez Display, `eligible_for_display`, membership duration, pauzy grup w aktywnej kampanii, manual CPC przy podłodze. Przy automatycznej strategii stawek zwraca jawne `bids_not_the_constraint` — po to, żeby nikt nie „naprawiał" braku emisji podnoszeniem CPC.
 - [x] Jedno miejsce egzekwowania limitów kwotowych + sweep w testach po wszystkich toolach i polach `*_pln` (wcześniej capy były kopiowanym `if`-em w każdym handlerze; `target_cpa_pln` i zagnieżdżone `cpc_bid_pln` w `*_full` nie miały żadnego limitu)
 - [ ] Rate limiting — max N mutacji na minutę (server-side)
-- [ ] Waluta konta w preview i komunikatach limitów — `listAccounts` już czyta `customer_client.currency_code`, warstwa write go ignoruje. Dziś komunikat „500 PLN" na koncie EUR/CZK/HUF jest nieprawdziwy: cap to zawsze 500 **jednostek waluty konta** (≈2100 zł na EUR, ≈5 zł na HUF).
-- [ ] Przenazwać pola `*_pln` → `*_amount` („in account currency units”), `formatPln` → `formatAmount(micros, currency)`; 81 wystąpień, breaking change API tooli
-- [ ] Konfigurowalny budget cap (nie globalny 500) — ustawiany przez użytkownika, domyślnie w relacji X PLN = 1/4 X EUR = 1/4 X USD (500 PLN / 125 EUR / 125 USD) zhardkodowanej na start. Otwarte: domyślne dla walut poza tą trójką (CZK, HUF)
+- [x] Waluta konta w preview, komunikatach limitów i progach raportów — `getAccountCurrency()` (cache per konto, fallback bez sieci gdy brak credentiali), `formatAmount(micros, currency)`, raporty analityczne zwracają `currency` i `thresholds_note`. Nigdzie nie ma już zahardkodowanego „PLN".
+- [x] Przenazwane pola `*_pln` → `*_amount`, `formatPln` → `formatAmount(micros, currency)` — **breaking change API tooli**, bez aliasów: konsumentem schematów jest LLM czytający manifest na żywo, a podwójne pola dopisałyby ~2k tokenów do manifestu, który właśnie ciąłem z 21k.
+- [x] Konfigurowalne capy — `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` w jednostkach waluty konta (ustawione = dosłownie, bez skalowania). Domyślne skalowane przez `CURRENCY_UNIT_SCALE`: PLN 1, EUR/USD/GBP/CHF 0.25, BGN 0.5, RON 1.25, DKK 2, SEK/NOK 2.5, CZK 5, UAH 10, HUF 100. Nieznana waluta → skala 1, czyli najostrzejszy wariant (świadomy fail-safe, nie przeoczenie).
 - [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania
       na wzór istniejącej. Cache na struktury kampanii (ad groupy, keywordy, ustawienia) jako template.
 

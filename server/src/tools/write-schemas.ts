@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-export const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
-export const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
-export const MAX_TARGET_CPA_MICROS = 500_000_000; // 500 PLN safety cap
 export const MAX_TARGET_ROAS = 100; // 10000% sanity cap
 export const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 export const MAX_KEYWORDS_PER_MUTATION = 100;

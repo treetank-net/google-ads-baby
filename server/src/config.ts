@@ -14,6 +14,9 @@ export interface AdsConfig {
   toolProfile: ToolProfile;
   mutationTokenTtlSeconds: string;
   confirmStateTtlSeconds: string;
+  maxDailyBudgetUnits: string;
+  maxCpcUnits: string;
+  maxTargetCpaUnits: string;
 }
 
 interface SavedConfig {
@@ -26,6 +29,9 @@ interface SavedConfig {
   toolProfile?: ToolProfile;
   mutationTokenTtlSeconds?: string;
   confirmStateTtlSeconds?: string;
+  maxDailyBudgetUnits?: string;
+  maxCpcUnits?: string;
+  maxTargetCpaUnits?: string;
   savedAt?: string;
 }
 
@@ -89,5 +95,8 @@ export async function configFromEnv(): Promise<AdsConfig> {
     toolProfile: normalizeProfile(env('GOOGLE_ADS_BABY_PROFILE') || saved.toolProfile),
     mutationTokenTtlSeconds,
     confirmStateTtlSeconds,
+    maxDailyBudgetUnits: env('GOOGLE_ADS_MAX_DAILY_BUDGET') || saved.maxDailyBudgetUnits || '',
+    maxCpcUnits: env('GOOGLE_ADS_MAX_CPC') || saved.maxCpcUnits || '',
+    maxTargetCpaUnits: env('GOOGLE_ADS_MAX_TARGET_CPA') || saved.maxTargetCpaUnits || '',
   };
 }

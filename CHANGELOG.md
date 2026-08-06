@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.20.0
+
+The plugin claimed every amount was in PLN. On the EUR, CZK and HUF accounts in the same MCC that
+was simply false — micros are always in the account currency, and nothing converted them. The
+budget cap said "500 PLN/day" while enforcing 500 units of whatever the account used: about
+2 100 zł on a EUR account and about 5 zł on a HUF one. This release removes the lie.
+
+### Breaking
+- **Every `*_pln` tool field is renamed to `*_amount`**: `daily_budget_pln` → `daily_budget_amount`, `new_budget_pln` → `new_budget_amount`, `current_budget_pln` → `current_budget_amount`, `cpc_bid_pln` → `cpc_bid_amount`, `target_cpa_pln` → `target_cpa_amount`, including the nested fields inside the `*_full` builders. No aliases were kept: the consumer of these schemas is a model reading the manifest live, and carrying both names would have added roughly 2 000 tokens to a manifest that 0.19.0 had just cut down. Saved prompts or notes that spell out `daily_budget_pln` need updating; the model itself picks up the new name from the schema.
+
+### Added
+- **Amounts carry the account currency.** `getAccountCurrency()` reads `customer.currency_code` once per account and caches it. Previews, limit messages and `before → after` lines now render through `formatAmount(micros, currency)`, so a EUR account is told "125 EUR", not "125 PLN". When the currency cannot be read the text says "account currency unit(s)" rather than guessing PLN.
+- **Safety caps scale with the currency** instead of being one number everywhere. Defaults are 500 / 50 / 500 units on PLN and scale by `CURRENCY_UNIT_SCALE`: PLN 1, EUR/USD/GBP/CHF 0.25, BGN 0.5, RON 1.25, DKK 2, SEK/NOK 2.5, CZK 5, UAH 10, HUF 100. An unknown currency keeps the PLN numbers — the strictest option for a weak currency, chosen deliberately.
+- **`GOOGLE_ADS_MAX_DAILY_BUDGET`, `GOOGLE_ADS_MAX_CPC` and `GOOGLE_ADS_MAX_TARGET_CPA`** set caps in account currency units. An explicit value is used exactly as given and is not scaled, so a EUR account can be pinned to 80 EUR/day without reasoning about exchange rates. They can also be saved in `config.json`.
+
+### Fixed
+- **Diagnostic cost thresholds were money too, and were equally wrong.** The waste floor of 50 units is about 0.5 zł on a HUF account, so `get_account_hygiene_report` and `get_search_terms_waste_candidates` would have flagged essentially every campaign that ever spent anything; on EUR the same floor is about 215 zł and would have hidden real waste. The `lowCpcUnits: 0.1` floor in the Display diagnostics had the same problem. Thresholds ending in `Units` are now scaled by the account currency; ratios and day counts are untouched. Each report returns the account `currency`, and says in `thresholds_note` when scaling was applied or when the currency could not be read.
+
+### Changed
+- Suite is at 225 assertions. New ones cover the scale table, the configured-cap overrides (including that a nonsense or negative value is ignored rather than treated as zero), that limit messages no longer contain "PLN", and that the same spend is waste on a PLN account but not on a HUF one.
+- The `full` manifest grew from 21 248 to 21 433 tokens (`manage` 10 352 → 10 424, `read` unchanged) because the amount fields now say which currency they are in. Worth 185 tokens.
+
 ## v0.19.0
 
 ### Added

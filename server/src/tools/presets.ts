@@ -4,9 +4,9 @@ import type {
   DisplayCampaignFullPayload,
   PerformanceMaxCampaignFullPayload,
 } from '../client/campaigns.js';
+import { MICROS_PER_UNIT, formatAmount } from './amounts.js';
 
-const PLN_TO_MICROS = 1_000_000;
-const DEFAULT_CPC_MICROS = 1 * PLN_TO_MICROS;
+const DEFAULT_CPC_MICROS = 1 * MICROS_PER_UNIT;
 
 const GEO_POLAND = '2616';
 const LANG_POLISH = '1045';
@@ -119,29 +119,29 @@ export function buildSearchCampaignPayload(input: SearchCampaignFullInput): Sear
   };
 }
 
-function formatBidding(bidding: SearchCampaignBidding): string {
+function formatBidding(bidding: SearchCampaignBidding, currency: string): string {
   switch (bidding.type) {
     case 'TARGET_CPA':
-      return `Target CPA ${((bidding.targetCpaMicros ?? 0) / PLN_TO_MICROS).toFixed(2)} PLN`;
+      return `Target CPA ${formatAmount(bidding.targetCpaMicros ?? 0, currency)}`;
     case 'TARGET_ROAS':
       return `Target ROAS ${((bidding.targetRoas ?? 0) * 100).toFixed(0)}%`;
     case 'MAXIMIZE_CONVERSION_VALUE':
       return bidding.targetRoas ? `Maximize conversion value (tROAS ${((bidding.targetRoas) * 100).toFixed(0)}%)` : 'Maximize conversion value';
     case 'MAXIMIZE_CONVERSIONS':
-      return bidding.targetCpaMicros ? `Maximize conversions (tCPA ${((bidding.targetCpaMicros) / PLN_TO_MICROS).toFixed(2)} PLN)` : 'Maximize conversions';
+      return bidding.targetCpaMicros ? `Maximize conversions (tCPA ${formatAmount(bidding.targetCpaMicros, currency)})` : 'Maximize conversions';
     case 'MANUAL_CPC':
     default:
       return 'Manual CPC';
   }
 }
 
-export function formatSearchCampaignPreview(customerId: string, p: SearchCampaignFullPayload): string {
-  const pln = (micros: number) => `${(micros / PLN_TO_MICROS).toFixed(2)} PLN`;
+export function formatSearchCampaignPreview(customerId: string, p: SearchCampaignFullPayload, currency: string): string {
+  const amount = (micros: number) => formatAmount(micros, currency);
   const lines: string[] = [];
   lines.push(`Create SEARCH campaign "${p.campaignName}" on account ${customerId}`);
   lines.push(`Status: ${p.status}`);
-  lines.push(`Daily budget: ${pln(p.dailyBudgetMicros)}`);
-  lines.push(`Bidding: ${formatBidding(p.bidding)}`);
+  lines.push(`Daily budget: ${amount(p.dailyBudgetMicros)}`);
+  lines.push(`Bidding: ${formatBidding(p.bidding, currency)}`);
   if (p.locationCriterionIds.length) lines.push(`Geo targets: ${p.locationCriterionIds.join(', ')} (${p.positiveGeoTargetType})`);
   if (p.languageCriterionIds.length) lines.push(`Languages: ${p.languageCriterionIds.join(', ')}`);
   if (p.campaignNegatives.length) {
@@ -150,7 +150,7 @@ export function formatSearchCampaignPreview(customerId: string, p: SearchCampaig
   lines.push('');
   lines.push(`Ad groups (${p.adGroups.length}):`);
   for (const ag of p.adGroups) {
-    lines.push(`- "${ag.name}" — CPC ${pln(ag.cpcBidMicros)}`);
+    lines.push(`- "${ag.name}" — CPC ${amount(ag.cpcBidMicros)}`);
     lines.push(`    Keywords (${ag.keywords.length}): ${ag.keywords.map((k) => `${k.text} [${k.matchType}]`).join(', ')}`);
     lines.push(`    RSA: ${ag.headlines.length} headlines / ${ag.descriptions.length} descriptions → ${ag.finalUrl}`);
   }
@@ -198,17 +198,17 @@ export function buildDisplayCampaignPayload(input: DisplayCampaignFullInput): Di
   };
 }
 
-export function formatDisplayCampaignPreview(customerId: string, p: DisplayCampaignFullPayload): string {
-  const pln = (micros: number) => `${(micros / PLN_TO_MICROS).toFixed(2)} PLN`;
+export function formatDisplayCampaignPreview(customerId: string, p: DisplayCampaignFullPayload, currency: string): string {
+  const amount = (micros: number) => formatAmount(micros, currency);
   const lines: string[] = [];
   lines.push(`Create DISPLAY campaign "${p.campaignName}" on account ${customerId}`);
   lines.push(`Status: ${p.status}`);
-  lines.push(`Daily budget: ${pln(p.dailyBudgetMicros)}`);
-  lines.push(`Bidding: ${formatBidding(p.bidding)}`);
+  lines.push(`Daily budget: ${amount(p.dailyBudgetMicros)}`);
+  lines.push(`Bidding: ${formatBidding(p.bidding, currency)}`);
   if (p.locationCriterionIds.length) lines.push(`Geo targets: ${p.locationCriterionIds.join(', ')} (${p.positiveGeoTargetType})`);
   if (p.languageCriterionIds.length) lines.push(`Languages: ${p.languageCriterionIds.join(', ')}`);
   lines.push('');
-  lines.push(`Ad group: "${p.adGroup.name}" — CPC ${pln(p.adGroup.cpcBidMicros)}`);
+  lines.push(`Ad group: "${p.adGroup.name}" — CPC ${amount(p.adGroup.cpcBidMicros)}`);
   lines.push(`Responsive display ad: ${p.ad.headlines.length} headlines, ${p.ad.descriptions.length} descriptions, business "${p.ad.businessName}" → ${p.ad.finalUrl}`);
   lines.push(`Images: ${p.ad.marketingImageAssetIds.length} marketing, ${p.ad.squareMarketingImageAssetIds.length} square, ${p.ad.logoImageAssetIds.length} logo (existing asset IDs)`);
   lines.push('');
@@ -251,12 +251,12 @@ export function buildPerformanceMaxPayload(input: PerformanceMaxCampaignFullInpu
   };
 }
 
-export function formatPmaxCampaignPreview(customerId: string, p: PerformanceMaxCampaignFullPayload): string {
-  const pln = (micros: number) => `${(micros / PLN_TO_MICROS).toFixed(2)} PLN`;
+export function formatPmaxCampaignPreview(customerId: string, p: PerformanceMaxCampaignFullPayload, currency: string): string {
+  const amount = (micros: number) => formatAmount(micros, currency);
   const lines: string[] = [];
   lines.push(`Create PERFORMANCE MAX campaign "${p.campaignName}" on account ${customerId}`);
   lines.push(`Status: ${p.status}`);
-  lines.push(`Daily budget: ${pln(p.dailyBudgetMicros)}`);
+  lines.push(`Daily budget: ${amount(p.dailyBudgetMicros)}`);
   lines.push(`Bidding: ${p.targetRoas ? `Maximize conversion value (tROAS ${(p.targetRoas * 100).toFixed(0)}%)` : 'Maximize conversion value'}`);
   lines.push(`AI asset enhancements: ${p.optOutAiEnhancements ? 'OFF (opted out: text + final URL expansion)' : 'ON (Google defaults)'}`);
   lines.push('');

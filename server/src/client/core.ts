@@ -34,6 +34,22 @@ export async function listAccounts(cfg: AdsConfig): Promise<Array<{ id: string; 
   }));
 }
 
+const accountCurrencyCache = new Map<string, string>();
+
+export async function getAccountCurrency(cfg: AdsConfig, customerId: string): Promise<string> {
+  const cached = accountCurrencyCache.get(customerId);
+  if (cached) return cached;
+  if (!cfg.refreshToken || !cfg.developerToken) return '';
+  try {
+    const rows = await executeGaql(cfg, customerId, 'SELECT customer.currency_code FROM customer LIMIT 1') as any[];
+    const currency = String(rows[0]?.customer?.currency_code ?? '').toUpperCase();
+    if (currency) accountCurrencyCache.set(customerId, currency);
+    return currency;
+  } catch {
+    return '';
+  }
+}
+
 export async function getCampaigns(cfg: AdsConfig, customerId: string, days: 7 | 30 = 30): Promise<unknown[]> {
   const customer = getCustomer(cfg, customerId);
   return customer.query(`

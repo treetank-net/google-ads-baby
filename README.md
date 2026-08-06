@@ -123,7 +123,34 @@ GOOGLE_ADS_SAFETY_LEVEL
 GOOGLE_ADS_BABY_PROFILE
 GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS
 GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS
+GOOGLE_ADS_MAX_DAILY_BUDGET
+GOOGLE_ADS_MAX_CPC
+GOOGLE_ADS_MAX_TARGET_CPA
 ```
+
+## Amounts and Account Currency
+
+Every `*_amount` field is in the **account currency** — the plugin never converts. `list_accounts`
+shows the currency of each account, and the analysis reports repeat it in a `currency` field.
+
+Safety caps default to 500 / 50 / 500 units on a PLN account and are scaled per currency, so the
+cap means roughly the same amount of money everywhere instead of the same number:
+
+| Currency | Daily budget | Max CPC | Target CPA |
+| --- | --- | --- | --- |
+| PLN | 500 | 50 | 500 |
+| EUR, USD, GBP, CHF | 125 | 12.50 | 125 |
+| CZK | 2 500 | 250 | 2 500 |
+| HUF | 50 000 | 5 000 | 50 000 |
+| unknown / unreadable | 500 | 50 | 500 |
+
+An unknown currency falls back to the PLN numbers — the strictest option for weak currencies, on
+purpose. Set `GOOGLE_ADS_MAX_DAILY_BUDGET`, `GOOGLE_ADS_MAX_CPC` or `GOOGLE_ADS_MAX_TARGET_CPA`
+to a number of account currency units to override a cap outright; an explicit value is used as
+given and is not scaled.
+
+The cost thresholds inside the analysis reports (waste floors, zero-spend floors, the low-CPC
+floor in the Display diagnostics) are scaled the same way, and the report says so when it happens.
 
 ## Tool Profiles
 
@@ -133,7 +160,7 @@ only need part of the plugin. Restart the MCP server after changing it.
 
 | Profile | Tools | Manifest | What it covers |
 | --- | --- | --- | --- |
-| `full` (default) | 62 | ~21 200 tok | Everything |
+| `full` (default) | 62 | ~21 400 tok | Everything |
 | `manage` | 38 | ~10 400 tok | Reads, diagnostics, and edits to existing entities (budget, bids, status, text, targeting, schedules). No creation, assets, cloning or `*_full` builders. |
 | `read` | 15 | ~3 800 tok | Reads, the five analysis reports, mutation history, auth. No `prepare_*`/`confirm_*` at all — mutation is impossible, not merely gated. |
 

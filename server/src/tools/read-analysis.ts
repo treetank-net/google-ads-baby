@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
-import { executeGaql } from '../client.js';
+import { executeGaql, getAccountCurrency } from '../client.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, requireCustomerId } from '../validation.js';
 import {
@@ -23,6 +23,11 @@ import {
   buildUserListQuery,
   summarize,
   windowClause,
+  scaleUnitThresholds,
+  HYGIENE_DEFAULTS,
+  WASTE_DEFAULTS,
+  PMAX_DEFAULTS,
+  DISPLAY_REMARKETING_DEFAULTS,
   type Finding,
   type HygieneRow,
   type PmaxAssetGroupRow,
@@ -34,9 +39,28 @@ import {
   type UserListRow,
 } from './analysis-helpers.js';
 import { pageSchema, pageCharsSchema } from './read-helpers.js';
+import { currencyUnitScale } from './amounts.js';
 import { toTsv, paginate, pageNote } from './format.js';
 
 const renderFindings = (rows: Finding[]) => JSON.stringify(rows, null, 2);
+
+interface AmountContext {
+  currency: string;
+  scale: number;
+}
+
+async function amountContext(cfg: AdsConfig, customerId: string): Promise<AmountContext> {
+  const currency = await getAccountCurrency(cfg, customerId);
+  return { currency, scale: currencyUnitScale(currency) };
+}
+
+function thresholdNote(ctx: AmountContext): Record<string, string> {
+  if (!ctx.currency) {
+    return { thresholds_note: 'The account currency could not be read, so cost thresholds are applied as raw account currency units tuned for PLN accounts. Verify the amounts before acting on them.' };
+  }
+  if (ctx.scale === 1) return {};
+  return { thresholds_note: `Cost thresholds are scaled ${ctx.scale}x from their PLN defaults to match ${ctx.currency}. Every amount in this report is in ${ctx.currency}.` };
+}
 
 function report(name: string, customerId: string, extra: Record<string, unknown>, page?: number, pageChars?: number) {
   const body: Record<string, unknown> = { report: name, customer_id: customerId, ...extra };
@@ -71,11 +95,14 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
         const cid = normalizeCustomerId(customer_id);
+        const ctx = await amountContext(cfg, cid);
         const windowDays = Number(days);
         const rows = (await executeGaql(cfg, cid, buildHygieneQuery(windowClause(windowDays)))) as HygieneRow[];
-        const findings = analyzeAccountHygiene(rows, windowDays);
+        const findings = analyzeAccountHygiene(rows, windowDays, scaleUnitThresholds(HYGIENE_DEFAULTS, ctx.scale));
         return report('account_hygiene', cid, {
           window_days: windowDays,
+          currency: ctx.currency,
+          ...thresholdNote(ctx),
           campaigns_scanned: rows.length,
           summary: summarize(findings),
           findings,
@@ -104,11 +131,13 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
         const cid = normalizeCustomerId(customer_id);
+        const ctx = await amountContext(cfg, cid);
         const windowDays = Number(days);
         const rows = (await executeGaql(cfg, cid, buildScalingQuery(windowClause(windowDays)))) as ScalingRow[];
         const findings = analyzeScalingCandidates(rows, windowDays);
         return report('budget_scaling_candidates', cid, {
           window_days: windowDays,
+          currency: ctx.currency,
           campaigns_scanned: rows.length,
           summary: summarize(findings),
           findings,
@@ -138,15 +167,18 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
         const cid = normalizeCustomerId(customer_id);
+        const ctx = await amountContext(cfg, cid);
         const recent = Number(recent_days);
         const cross = Number(cross_check_days);
         const [rows30, rows90] = await Promise.all([
           executeGaql(cfg, cid, buildSearchTermsQuery(windowClause(recent))) as Promise<SearchTermRow[]>,
           executeGaql(cfg, cid, buildSearchTermsQuery(windowClause(cross))) as Promise<SearchTermRow[]>,
         ]);
-        const { findings, excluded_bounce_back } = analyzeSearchTermsWaste(rows30, rows90);
+        const { findings, excluded_bounce_back } = analyzeSearchTermsWaste(rows30, rows90, scaleUnitThresholds(WASTE_DEFAULTS, ctx.scale));
         return report('search_terms_waste', cid, {
           recent_days: recent,
+          currency: ctx.currency,
+          ...thresholdNote(ctx),
           cross_check_days: cross,
           terms_scanned: rows30.length,
           excluded_bounce_back,
@@ -178,6 +210,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
         const cid = normalizeCustomerId(customer_id);
+        const ctx = await amountContext(cfg, cid);
         const windowDays = Number(days);
         const notChecked: string[] = [];
         const fetchOptional = async <T>(label: string, query: string): Promise<T[]> => {
@@ -194,12 +227,14 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           fetchOptional<DisplayAudienceRow>('audience links', buildDisplayAudienceQuery()),
           fetchOptional<UserListRow>('user lists', buildUserListQuery()),
         ]);
-        const { findings, audience_coverage } = analyzeDisplayRemarketing({ campaigns, adGroups, audiences, userLists }, windowDays);
+        const { findings, audience_coverage } = analyzeDisplayRemarketing({ campaigns, adGroups, audiences, userLists }, windowDays, scaleUnitThresholds(DISPLAY_REMARKETING_DEFAULTS, ctx.scale));
         const ranked = rankAudienceCoverage(audience_coverage);
         const coveragePage = paginate(ranked, page ?? 1, page_chars);
         const coverageNote = pageNote(coveragePage, 'user lists');
         return report('display_remarketing_diagnostics', cid, {
           window_days: windowDays,
+          currency: ctx.currency,
+          ...thresholdNote(ctx),
           campaigns_scanned: campaigns.length,
           ad_groups_scanned: adGroups.length,
           user_lists_attached: audience_coverage.length,
@@ -235,11 +270,14 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
         const cid = normalizeCustomerId(customer_id);
+        const ctx = await amountContext(cfg, cid);
         const windowDays = Number(days);
         const rows = (await executeGaql(cfg, cid, buildPmaxQuery(windowClause(windowDays)))) as PmaxAssetGroupRow[];
-        const { findings, breakdown } = analyzePmaxBreakdown(rows);
+        const { findings, breakdown } = analyzePmaxBreakdown(rows, scaleUnitThresholds(PMAX_DEFAULTS, ctx.scale));
         return report('pmax_channel_breakdown', cid, {
           window_days: windowDays,
+          currency: ctx.currency,
+          ...thresholdNote(ctx),
           asset_groups_scanned: rows.length,
           breakdown,
           summary: summarize(findings),
