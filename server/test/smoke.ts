@@ -1,7 +1,9 @@
-import { configFromEnv, saveConfig, loadSavedConfig, getConfigPath } from '../src/config.js';
+import { configFromEnv, saveConfig, loadSavedConfig, getConfigPath, getConfigDir } from '../src/config.js';
 import { startAuthFlow, checkAuthStatus } from '../src/auth.js';
 import { OAUTH_CLIENT_ID } from '../src/constants.js';
 import { unlink } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
+import { join } from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerWriteTools } from '../src/tools/write.js';
 import { updatedFieldNames } from '../src/history.js';
@@ -19,6 +21,7 @@ import {
   changeLine,
   microsChangeLine,
   manualBiddingRequiredWarning,
+  enumName,
   sharedBudgetWarning,
   validateResponsiveDisplayText,
 } from '../src/tools/write-helpers.js';
@@ -28,9 +31,14 @@ import {
   analyzeSearchTermsWaste,
   analyzePmaxBreakdown,
   analyzeDisplayRemarketing,
+  trimAudienceCoverage,
+  capFindings,
+  omittedFindingsNote,
+  enumLabel,
   windowClause,
   MICROS,
 } from '../src/tools/analysis-helpers.js';
+import { enums } from 'google-ads-api';
 
 let passed = 0;
 let failed = 0;
@@ -221,7 +229,13 @@ function testLimitHelpers() {
   assert('unknown previous amount degrades gracefully', microsChangeLine('Max CPC', undefined, 1_000_000).includes('(not set)'));
 
   assert('manual CPC needs no bidding warning', manualBiddingRequiredWarning('MANUAL_CPC') === null);
+  assert('enhanced CPC honours ad group bids, so no warning', manualBiddingRequiredWarning('ENHANCED_CPC') === null);
   assert('automated bidding warns that CPC is ignored', (manualBiddingRequiredWarning('MAXIMIZE_CONVERSIONS') ?? '').includes('will not affect delivery'));
+  assert('CPM bidding warns that CPC is ignored', (manualBiddingRequiredWarning('MANUAL_CPM') ?? '').includes('will not affect delivery'));
+  assert('a raw enum number never reaches the bidding warning', manualBiddingRequiredWarning(enumName(enums.BiddingStrategyType as any, 3)) === null);
+  assert('enumName maps ad types to names', enumName(enums.AdType as any, 19) === 'RESPONSIVE_DISPLAY_AD');
+  assert('enumName maps ad group status to names', enumName(enums.AdGroupStatus as any, 3) === 'PAUSED');
+  assert('enumName leaves an unknown value visible', enumName(enums.AdGroupStatus as any, 987) === '987');
   assert('unshared budget needs no warning', sharedBudgetWarning(1, false) === null);
   assert('shared budget warns about other campaigns', (sharedBudgetWarning(3, true) ?? '').includes('3 campaign(s)'));
 
@@ -298,6 +312,10 @@ async function testCapEnforcement() {
   console.log(`  checked ${checked} money field(s); exempt: ${skipped.length ? skipped.join(', ') : 'none'}`);
 }
 
+function displayTaskStub() {
+  return { title: 't', intent: 'i', suggested_workflow: 'w', source_type: 'review' as const, reason: 'r' };
+}
+
 function testDisplayRemarketing() {
   console.log('\n--- Display remarketing diagnostics ---');
 
@@ -358,12 +376,100 @@ function testDisplayRemarketing() {
     userLists: [list(6, 25000, true)],
   }, 30);
   assert('display: healthy setup yields no findings', healthy.findings.length === 0, healthy.findings.map((f) => f.code).join(','));
+
+  // GAQL returns enums as numbers, not names. Everything above must still hold
+  // when the rows look the way the API actually returns them.
+  const numericEnums = analyzeDisplayRemarketing({
+    campaigns: [{
+      campaign: { id: 6, name: 'Numeric', status: 2, serving_status: 5, bidding_strategy_type: 3 } as any,
+      campaign_budget: { amount_micros: m(30) },
+      metrics: { impressions: 0 },
+    }],
+    adGroups: [
+      { campaign: { id: 6 }, ad_group: { id: 61, name: 'Paused AG', status: 3, cpc_bid_micros: m(1) } as any },
+      { campaign: { id: 6 }, ad_group: { id: 62, name: 'Cheap AG', status: 2, cpc_bid_micros: 50_000 } as any },
+    ],
+    audiences: [{ campaign: { id: 6 }, ad_group: { id: 62 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/5' } } }],
+    userLists: [list(5, 40, true)],
+  }, 30);
+  const numericCodes = numericEnums.findings.map((f) => f.code);
+  assert('display: numeric CampaignStatus decoded as ENABLED', numericCodes.includes('zero_impressions'));
+  assert('display: numeric serving_status decoded and flagged', numericCodes.includes('campaign_not_serving'));
+  assert('display: numeric AdGroupStatus decoded as PAUSED', numericCodes.includes('ad_group_paused_in_enabled_campaign'));
+  assert('display: numeric MANUAL_CPC decoded, low bid flagged', numericCodes.includes('manual_cpc_below_floor'));
+  assert('display: numeric MANUAL_CPC produces no bids-are-ignored note', !numericCodes.includes('bids_not_the_constraint'));
+
+  // The same list attached to several campaigns must yield one finding, not one per campaign.
+  const sharedList = analyzeDisplayRemarketing({
+    campaigns: [
+      { campaign: { id: 7, name: 'A', status: 2, serving_status: 2, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 500 } },
+      { campaign: { id: 8, name: 'B', status: 2, serving_status: 2, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 500 } },
+      { campaign: { id: 9, name: 'C', status: 3, serving_status: 2, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } },
+    ],
+    adGroups: [],
+    audiences: [7, 8, 9].map((cid) => ({ campaign: { id: cid }, ad_group: { id: cid * 10 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/4' } } })),
+    userLists: [list(4, 40, true)],
+  }, 30);
+  const undersized = sharedList.findings.filter((f) => f.code === 'audience_below_display_minimum');
+  assert('display: one finding per list, not per campaign', undersized.length === 1, `got ${undersized.length}`);
+  assert('display: finding records how many campaigns use the list', undersized[0]?.metrics.campaigns === 3);
+  assert('display: coverage deduplicated to one row per list', sharedList.audience_coverage.length === 1);
+
+  // A list used only by paused campaigns is not a live emergency.
+  const pausedOnly = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 10, name: 'Paused', status: 3, serving_status: 2, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } }],
+    adGroups: [],
+    audiences: [{ campaign: { id: 10 }, ad_group: { id: 101 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/3' } } }],
+    userLists: [list(3, 40, true)],
+  }, 30);
+  assert(
+    'display: undersized list in paused campaigns downgraded to info',
+    pausedOnly.findings.find((f) => f.code === 'audience_below_display_minimum')?.severity === 'info',
+  );
+
+  // Google reports 0 Display users for list types it does not size; that is not evidence of an empty audience.
+  const unreported = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 11, name: 'YT list', status: 2, serving_status: 2, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 900 } }],
+    adGroups: [],
+    audiences: [{ campaign: { id: 11 }, ad_group: { id: 111 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/2' } } }],
+    userLists: [{ user_list: { id: 2, name: 'YT 540d', resource_name: 'customers/1/userLists/2', size_for_display: 0, size_for_search: 540_000, eligible_for_display: true, membership_life_span: 540 } }],
+  }, 30);
+  const unreportedCodes = unreported.findings.map((f) => f.code);
+  assert('display: unsized Display list is not called undersized', !unreportedCodes.includes('audience_below_display_minimum'));
+  assert('display: unsized Display list reported as info', unreported.findings.find((f) => f.code === 'display_size_not_reported')?.severity === 'info');
+
+  const coverage = Array.from({ length: 45 }, (_, index) => ({ user_list: `l${index}`, enabled_campaigns: index }));
+  const trimmedCoverage = trimAudienceCoverage(coverage, 40);
+  assert('display: coverage table capped', trimmedCoverage.coverage.length === 40);
+  assert('display: cap reports how many rows were dropped', trimmedCoverage.omitted === 5);
+  assert('display: capped table keeps the live lists', trimmedCoverage.coverage.every((row) => Number(row.enabled_campaigns) >= 5));
+  assert('display: small coverage table untouched', trimAudienceCoverage(coverage.slice(0, 3), 40).omitted === 0);
+
+  const many = [
+    ...Array.from({ length: 4 }, (_, i) => ({ code: 'c', severity: 'critical' as const, entity: `c${i}`, observation: '', metrics: {}, suggested_task: displayTaskStub(), prepare_actions: [] })),
+    ...Array.from({ length: 30 }, (_, i) => ({ code: 'i', severity: 'info' as const, entity: `i${i}`, observation: '', metrics: {}, suggested_task: displayTaskStub(), prepare_actions: [] })),
+  ];
+  const cappedFindings = capFindings(many, 25);
+  assert('findings capped at the limit', cappedFindings.findings.length === 25);
+  assert('cap keeps every critical finding', cappedFindings.findings.filter((f) => f.severity === 'critical').length === 4);
+  assert('cap drops only info findings here', cappedFindings.omitted.info === 9 && cappedFindings.omitted.critical === 0);
+  assert('cap note states what was dropped', (omittedFindingsNote(cappedFindings.omitted) ?? '').includes('9 info'));
+  assert('no note when nothing was dropped', omittedFindingsNote(capFindings(many.slice(0, 5), 25).omitted) === null);
+
+  assert('enumLabel maps a number to its name', enumLabel(enums.CampaignStatus as any, 2) === 'ENABLED');
+  assert('enumLabel passes a name through', enumLabel(enums.CampaignStatus as any, 'PAUSED') === 'PAUSED');
+  assert('enumLabel leaves an unknown value visible', enumLabel(enums.CampaignStatus as any, 999) === '999');
+  assert('enumLabel treats missing as empty', enumLabel(enums.CampaignStatus as any, undefined) === '');
 }
 
 async function main() {
   console.log('Smoke test: google-ads-baby MCP server\n');
 
-  process.env['CLAUDE_PLUGIN_DATA'] = '/tmp/.gads-baby-test';
+  process.env['GOOGLE_ADS_BABY_DATA'] = join(tmpdir(), '.gads-baby-test');
+  if (getConfigDir() === join(homedir(), '.google-ads-baby')) {
+    console.log('  ABORT  refusing to run: the suite would write to the real config directory');
+    process.exit(1);
+  }
 
   await testConfig();
   await testSaveLoadConfig();

@@ -188,9 +188,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
           : '';
         lines.push(`${changeLine('Bidding strategy', state.biddingStrategyType, strategy_type)}${target}`);
       }
-      const apiCallCount = [name !== undefined || status !== undefined, budgetMicros !== undefined, strategy_type !== undefined].filter(Boolean).length;
-      if (apiCallCount > 1) {
-        lines.push(`Note: this runs as ${apiCallCount} separate Google Ads API calls (campaign, budget, bidding). A failure partway through can leave the update partially applied.`);
+      const apiCalls = [
+        name !== undefined || status !== undefined ? 'campaign' : null,
+        budgetMicros !== undefined ? 'budget' : null,
+        strategy_type !== undefined ? 'bidding' : null,
+      ].filter((call): call is string => call !== null);
+      if (apiCalls.length > 1) {
+        lines.push(`Note: this runs as ${apiCalls.length} separate Google Ads API calls (${apiCalls.join(', ')}). A failure partway through can leave the update partially applied.`);
       }
       const preview = lines.join('\n');
       const mutation = createToken('campaign_update', {

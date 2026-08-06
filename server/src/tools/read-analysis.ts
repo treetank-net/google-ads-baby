@@ -11,6 +11,9 @@ import {
   analyzeScalingCandidates,
   analyzeSearchTermsWaste,
   analyzeDisplayRemarketing,
+  trimAudienceCoverage,
+  capFindings,
+  omittedFindingsNote,
   buildHygieneQuery,
   buildPmaxQuery,
   buildScalingQuery,
@@ -33,7 +36,14 @@ import {
 } from './analysis-helpers.js';
 
 function report(name: string, customerId: string, extra: Record<string, unknown>) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ report: name, customer_id: customerId, ...extra }, null, 2) }] };
+  const body: Record<string, unknown> = { report: name, customer_id: customerId, ...extra };
+  if (Array.isArray(body.findings)) {
+    const capped = capFindings(body.findings as Finding[]);
+    body.findings = capped.findings;
+    const note = omittedFindingsNote(capped.omitted);
+    if (note) body.findings_note = note;
+  }
+  return { content: [{ type: 'text' as const, text: JSON.stringify(body, null, 2) }] };
 }
 
 const followUp =
@@ -173,11 +183,16 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           fetchOptional<UserListRow>('user lists', buildUserListQuery()),
         ]);
         const { findings, audience_coverage } = analyzeDisplayRemarketing({ campaigns, adGroups, audiences, userLists }, windowDays);
+        const trimmed = trimAudienceCoverage(audience_coverage);
         return report('display_remarketing_diagnostics', cid, {
           window_days: windowDays,
           campaigns_scanned: campaigns.length,
           ad_groups_scanned: adGroups.length,
-          audience_coverage,
+          user_lists_attached: audience_coverage.length,
+          audience_coverage: trimmed.coverage,
+          ...(trimmed.omitted
+            ? { audience_coverage_note: `Showing the ${trimmed.coverage.length} lists most used by enabled campaigns; ${trimmed.omitted} further list(s) omitted from this table. All of them are still covered by findings.` }
+            : {}),
           summary: summarize(findings),
           findings,
           not_checked: notChecked,

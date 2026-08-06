@@ -84,6 +84,16 @@ tools/
 - Ostrzeżenia kontekstowe w preview: `manualBiddingRequiredWarning()` (CPC ignorowany przy automatycznej strategii), `sharedBudgetWarning()` (budżet współdzielony przez N kampanii).
 - Gdy jedna akcja wymaga kilku wywołań API (`campaign_update` = campaign + budget + bidding), preview mówi o braku atomowości.
 
+**Enumy z GAQL — obowiązkowe dekodowanie:**
+GAQL zwraca enumy jako **liczby**, nie nazwy (`campaign.status` = `3`, nie `'PAUSED'`;
+`BiddingStrategyType` `3` = `MANUAL_CPC`, `4` = `MANUAL_CPM`). Każda wartość enuma, która trafia
+do preview, findings albo do porównania w kodzie, musi przejść przez `enumName()`
+(`write-helpers.ts`) lub `enumLabel()` (`analysis-helpers.ts`) — oba mapują liczbę na nazwę
+i przepuszczają nazwę bez zmian. Nigdy `String(row.campaign.status) === 'ENABLED'`: to porównanie
+jest zawsze fałszywe na żywych danych i **testy syntetyczne go nie wyłapią**, bo w testach
+podaje się nazwy. Nowy test na danych z GAQL musi karmić analizator liczbami
+(patrz `display: numeric ...` w `test/smoke.ts`).
+
 **Konwencje:**
 - Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
 - Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `plnFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_pln` wg reguł `PLN_FIELD_LIMITS`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_pln` z absurdalną kwotą, więc pominięty limit oblewa testy.

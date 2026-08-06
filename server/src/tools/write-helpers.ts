@@ -1,3 +1,4 @@
+import { enums } from 'google-ads-api';
 import type { AdsConfig } from '../config.js';
 import { executeGaql } from '../client.js';
 import { createToken, getTokenTtlSeconds } from '../confirm.js';
@@ -87,9 +88,19 @@ export function microsChangeLine(label: string, beforeMicros: number | undefined
   return `${base} (${percent >= 0 ? '+' : ''}${percent.toFixed(0)}%)`;
 }
 
+type EnumTable = Record<string | number, string | number>;
+
+export function enumName(table: EnumTable, value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  const name = table[value as keyof EnumTable];
+  return typeof name === 'string' ? name : String(value);
+}
+
+export const CPC_BID_HONORING_STRATEGIES = new Set(['MANUAL_CPC', 'ENHANCED_CPC', 'PERCENT_CPC']);
+
 export function manualBiddingRequiredWarning(biddingStrategyType: string | undefined): string | null {
-  if (!biddingStrategyType || biddingStrategyType === 'MANUAL_CPC') return null;
-  return `Warning: campaign bidding strategy is ${biddingStrategyType}. Google ignores ad group CPC bids unless the campaign uses MANUAL_CPC, so this bid change will not affect delivery.`;
+  if (!biddingStrategyType || CPC_BID_HONORING_STRATEGIES.has(biddingStrategyType)) return null;
+  return `Warning: campaign bidding strategy is ${biddingStrategyType}. Google ignores ad group CPC bids unless the campaign bids on clicks (${[...CPC_BID_HONORING_STRATEGIES].join(', ')}), so this bid change will not affect delivery.`;
 }
 
 export function sharedBudgetWarning(referenceCount: number | undefined, explicitlyShared: boolean | undefined): string | null {
@@ -354,12 +365,14 @@ export async function loadAdGroupState(cfg: AdsConfig, customerId: string, adGro
   return {
     adGroupId: String(row.ad_group?.id ?? adGroupId),
     name: String(row.ad_group?.name ?? ''),
-    status: String(row.ad_group?.status ?? ''),
+    status: enumName(enums.AdGroupStatus as EnumTable, row.ad_group?.status),
     cpcBidMicros: row.ad_group?.cpc_bid_micros === undefined ? undefined : Number(row.ad_group.cpc_bid_micros),
-    type: String(row.ad_group?.type ?? ''),
+    type: enumName(enums.AdGroupType as EnumTable, row.ad_group?.type),
     campaignId: String(row.campaign?.id ?? ''),
     campaignName: String(row.campaign?.name ?? ''),
-    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined ? undefined : String(row.campaign.bidding_strategy_type),
+    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined
+      ? undefined
+      : enumName(enums.BiddingStrategyType as EnumTable, row.campaign.bidding_strategy_type),
   };
 }
 
@@ -394,8 +407,10 @@ export async function loadCampaignState(cfg: AdsConfig, customerId: string, camp
   return {
     campaignId: String(row.campaign?.id ?? campaignId),
     name: String(row.campaign?.name ?? ''),
-    status: String(row.campaign?.status ?? ''),
-    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined ? undefined : String(row.campaign.bidding_strategy_type),
+    status: enumName(enums.CampaignStatus as EnumTable, row.campaign?.status),
+    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined
+      ? undefined
+      : enumName(enums.BiddingStrategyType as EnumTable, row.campaign.bidding_strategy_type),
     budgetId: row.campaign_budget?.id === undefined ? undefined : String(row.campaign_budget.id),
     budgetAmountMicros: row.campaign_budget?.amount_micros === undefined ? undefined : Number(row.campaign_budget.amount_micros),
     budgetExplicitlyShared: row.campaign_budget?.explicitly_shared,
@@ -425,8 +440,8 @@ export async function loadAdState(cfg: AdsConfig, customerId: string, adId: stri
     adId: String(ad.id ?? adId),
     adGroupId: String(row.ad_group?.id ?? ''),
     adGroupName: String(row.ad_group?.name ?? ''),
-    status: String(row.ad_group_ad?.status ?? ''),
-    type: String(ad.type ?? ''),
+    status: enumName(enums.AdGroupAdStatus as EnumTable, row.ad_group_ad?.status),
+    type: enumName(enums.AdType as EnumTable, ad.type),
     finalUrls: (ad.final_urls ?? []) as string[],
     headlines: textValues(creative?.headlines),
     descriptions: textValues(creative?.descriptions),

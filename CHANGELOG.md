@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.16.1
+
+Everything here was found by running 0.16.0 against a live account. The tools worked;
+what they *said* was wrong in ways a reader could not detect.
+
+### Fixed
+- **Enum values reached the user as raw numbers.** GAQL returns enums numerically, so `*_update` previews said `Status: 3 → ENABLED` and `Update ad 347658807327 (19)`. They now say `Status: PAUSED → ENABLED` and `(RESPONSIVE_DISPLAY_AD)`.
+- **The bidding-strategy warning fired on every CPC change, including when it was false.** It compared a number against the string `'MANUAL_CPC'`, so a campaign actually running MANUAL_CPC was told Google would ignore its bids. The warning now decodes the strategy first, and treats `ENHANCED_CPC` and `PERCENT_CPC` as bid-honouring alongside `MANUAL_CPC`.
+- **`get_display_remarketing_diagnostics` had five dead checks.** `campaign_not_serving`, `no_audience_attached`, `zero_impressions`, `ad_group_paused_in_enabled_campaign`, `manual_cpc_below_floor` and `bids_not_the_constraint` all tested enum *names* against numeric values and could never fire on real data — the very checks that tell you a bid change is pointless. The analyzer now accepts both forms.
+- **`audience_below_display_minimum` produced one critical finding per (list × campaign) pair** — 71 of them on one account, mostly duplicates, many for paused campaigns. Findings are now emitted once per list, carry the campaigns using it, and are downgraded to `info` when every campaign using the list is paused.
+- **A list Google does not size for Display was reported as empty.** Lists with `size_for_display: 0`, a large `size_for_search` and `eligible_for_display: true` are not undersized — Google simply does not populate the Display figure for those list types. That case is now a separate `display_size_not_reported` info finding that says so, instead of a false critical.
+- **The diagnostics response reached 97 KB on a 42-campaign account** — large enough to crowd out the context of the model meant to read it. Deduplication, a 40-row cap on the coverage table, and a 25-finding cap across every analysis report (most severe first, so criticals are never the ones dropped) bring the same account down to 42 KB. Both caps say in the response how many rows were dropped, and `summary` still counts every finding.
+- **`npm test` deleted the user's Google Ads credentials.** The suite set `CLAUDE_PLUGIN_DATA` while `config.ts` reads `GOOGLE_ADS_BABY_DATA`, so it wrote and then unlinked the real `~/.google-ads-baby/config.json`. It now redirects to a temp directory and aborts outright if the resolved config directory is the real one. If you ran `npm test` on 0.16.0, re-run `setup_google_auth`.
+- `prepare_campaign_update` no longer lists API calls it is not going to make ("2 separate calls (campaign, budget, bidding)" now names only the two it makes).
+
+### Verified against a live account
+- All five analysis tools and the three `*_update` tools were run against a live 42-campaign Display account (read-only: `prepare_*` previews only, no `confirm_mutation`). The GAQL field names introduced in 0.16.0 — `user_list.size_for_display`, `size_for_search`, `eligible_for_display`, `campaign.serving_status`, `campaign_budget.reference_count` — all exist and return data.
+- On that account the fixed diagnostics found what the dead checks had been hiding: three enabled Display campaigns with 115 / 35 / 15 daily budget and zero impressions over 30 days, one with `serving_status: ENDED`, and one remarketing campaign with no user list attached at all. None of those is a bid problem.
+
+### Changed
+- Smoke suite is up to 128 assertions. The new ones feed the analyzer **numeric** enums the way GAQL returns them — the old tests passed against the broken code because they only ever used synthetic name strings.
+
 ## v0.16.0
 
 ### Added

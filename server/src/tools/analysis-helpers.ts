@@ -1,6 +1,16 @@
 import { z } from 'zod';
+import { enums } from 'google-ads-api';
 
 export type Severity = 'critical' | 'warning' | 'info';
+
+type EnumTable = Record<string | number, string | number>;
+
+export function enumLabel(table: EnumTable, value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'string' && !/^\d+$/.test(value)) return value;
+  const name = table[value as keyof EnumTable];
+  return typeof name === 'string' ? name : String(value);
+}
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
 
@@ -448,6 +458,7 @@ export interface UserListRow {
     name?: string;
     resource_name?: string;
     size_for_display?: number | string;
+    size_for_search?: number | string;
     eligible_for_display?: boolean;
     membership_life_span?: number | string;
   };
@@ -495,10 +506,40 @@ export function buildUserListQuery(): string {
   return `
     SELECT
       user_list.id, user_list.name, user_list.resource_name,
-      user_list.size_for_display, user_list.eligible_for_display,
+      user_list.size_for_display, user_list.size_for_search,
+      user_list.eligible_for_display,
       user_list.membership_life_span
     FROM user_list
   `;
+}
+
+export const FINDINGS_LIMIT = 25;
+
+export function capFindings(findings: Finding[], limit = FINDINGS_LIMIT): { findings: Finding[]; omitted: Record<Severity, number> } {
+  const omitted: Record<Severity, number> = { critical: 0, warning: 0, info: 0 };
+  if (findings.length <= limit) return { findings, omitted };
+  const ranked = sortFindings(findings);
+  for (const finding of ranked.slice(limit)) omitted[finding.severity] += 1;
+  return { findings: ranked.slice(0, limit), omitted };
+}
+
+export function omittedFindingsNote(omitted: Record<Severity, number>): string | null {
+  const parts = (Object.entries(omitted) as Array<[Severity, number]>)
+    .filter(([, count]) => count > 0)
+    .map(([severity, count]) => `${count} ${severity}`);
+  if (!parts.length) return null;
+  return `Findings are capped at ${FINDINGS_LIMIT}, most severe first; ${parts.join(', ')} finding(s) are not listed. Counts in "summary" cover all of them. Narrow the window or fix the listed items and re-run to see the rest.`;
+}
+
+export const AUDIENCE_COVERAGE_LIMIT = 40;
+
+export function trimAudienceCoverage(
+  coverage: Array<Record<string, unknown>>,
+  limit = AUDIENCE_COVERAGE_LIMIT,
+): { coverage: Array<Record<string, unknown>>; omitted: number } {
+  if (coverage.length <= limit) return { coverage, omitted: 0 };
+  const ranked = [...coverage].sort((a, b) => Number(b.enabled_campaigns ?? 0) - Number(a.enabled_campaigns ?? 0));
+  return { coverage: ranked.slice(0, limit), omitted: coverage.length - limit };
 }
 
 function displayTask(title: string, reason: string, context: string): SuggestedTask {
@@ -539,14 +580,19 @@ export function analyzeDisplayRemarketing(
   }
 
   const audience_coverage: Array<Record<string, unknown>> = [];
+  const listUsage = new Map<string, {
+    list: UserListRow['user_list'];
+    resourceName: string;
+    campaigns: Array<{ id: string; name: string; enabled: boolean }>;
+  }>();
 
   for (const row of input.campaigns) {
     const campaignId = String(row.campaign?.id ?? '');
     const name = row.campaign?.name ?? (campaignId || 'unknown');
     const entity = `campaign ${name}`;
-    const status = String(row.campaign?.status ?? '');
-    const servingStatus = String(row.campaign?.serving_status ?? '');
-    const strategy = String(row.campaign?.bidding_strategy_type ?? '');
+    const status = enumLabel(enums.CampaignStatus as EnumTable, row.campaign?.status);
+    const servingStatus = enumLabel(enums.CampaignServingStatus as EnumTable, row.campaign?.serving_status);
+    const strategy = enumLabel(enums.BiddingStrategyType as EnumTable, row.campaign?.bidding_strategy_type);
     const impressions = Number(row.metrics?.impressions ?? 0);
     const dailyBudget = toUnits(row.campaign_budget?.amount_micros);
     const campaignAudiences = audiencesByCampaign.get(campaignId) ?? [];
@@ -592,53 +638,14 @@ export function analyzeDisplayRemarketing(
       const resourceName = audienceRow.ad_group_criterion?.user_list?.user_list;
       if (!resourceName || seenLists.has(String(resourceName))) continue;
       seenLists.add(String(resourceName));
-      const list = listsByResourceName.get(String(resourceName));
-      const listName = list?.name ?? String(resourceName);
-      const size = list?.size_for_display === undefined ? undefined : Number(list.size_for_display);
-      const membershipDays = list?.membership_life_span === undefined ? undefined : Number(list.membership_life_span);
-      audience_coverage.push({
-        campaign: name,
-        user_list: listName,
-        size_for_display: size ?? 'unknown',
-        eligible_for_display: list?.eligible_for_display ?? 'unknown',
-        membership_life_span_days: membershipDays ?? 'unknown',
-      });
-
-      if (size !== undefined && size < t.minDisplayListSize) {
-        findings.push({
-          code: 'audience_below_display_minimum',
-          severity: 'critical',
-          entity: `user list ${listName} (${name})`,
-          observation: `List has ${size} users for Display, below the ~${t.minDisplayListSize} needed to serve — this blocks delivery regardless of bid or budget.`,
-          metrics: { size_for_display: size, minimum: t.minDisplayListSize, campaign_id: campaignId },
-          suggested_task: displayTask(`Grow or replace remarketing list: ${listName}`, 'Remarketing list is below the Display minimum size.', `campaign_id=${campaignId}; user_list=${listName}; size=${size}`),
-          prepare_actions: [],
-        });
-      }
-
-      if (list?.eligible_for_display === false) {
-        findings.push({
-          code: 'audience_not_eligible_for_display',
-          severity: 'critical',
-          entity: `user list ${listName} (${name})`,
-          observation: 'List is not eligible for Display — check the tag/source and membership rules; Display cannot serve to it.',
-          metrics: { campaign_id: campaignId },
-          suggested_task: displayTask(`Restore Display eligibility for list: ${listName}`, 'Remarketing list is not eligible for the Display network.', `campaign_id=${campaignId}; user_list=${listName}`),
-          prepare_actions: [],
-        });
-      }
-
-      if (membershipDays !== undefined && membershipDays > 0 && membershipDays < t.shortMembershipDays && size !== undefined && size < t.minDisplayListSize * 10) {
-        findings.push({
-          code: 'short_membership_window',
-          severity: 'warning',
-          entity: `user list ${listName} (${name})`,
-          observation: `Membership lasts ${membershipDays}d on a list of ${size} users — the audience drains faster than it refills.`,
-          metrics: { membership_life_span_days: membershipDays, size_for_display: size },
-          suggested_task: displayTask(`Review membership window on list: ${listName}`, 'Short membership duration keeps the remarketing list too small to serve.', `campaign_id=${campaignId}; user_list=${listName}; membership_days=${membershipDays}`),
-          prepare_actions: [],
-        });
-      }
+      const key = String(resourceName);
+      const usage = listUsage.get(key) ?? {
+        list: listsByResourceName.get(key),
+        resourceName: key,
+        campaigns: [],
+      };
+      usage.campaigns.push({ id: campaignId, name, enabled: status === 'ENABLED' });
+      listUsage.set(key, usage);
     }
 
     const campaignAdGroups = input.adGroups.filter((adGroup) => String(adGroup.campaign?.id ?? '') === campaignId);
@@ -646,7 +653,7 @@ export function analyzeDisplayRemarketing(
       const adGroupName = adGroup.ad_group?.name ?? String(adGroup.ad_group?.id ?? 'unknown');
       const adGroupEntity = `ad group ${adGroupName} (${name})`;
       const cpc = toUnits(adGroup.ad_group?.cpc_bid_micros);
-      const adGroupStatus = String(adGroup.ad_group?.status ?? '');
+      const adGroupStatus = enumLabel(enums.AdGroupStatus as EnumTable, adGroup.ad_group?.status);
 
       if (status === 'ENABLED' && adGroupStatus === 'PAUSED') {
         findings.push({
@@ -681,6 +688,86 @@ export function analyzeDisplayRemarketing(
         observation: `Campaign uses ${strategy}, so ad group CPC bids are ignored by Google. Do not change bids to fix this delivery problem — look at audience size, serving status, ad approval and conversion signal instead.`,
         metrics: { bidding_strategy_type: strategy, impressions, campaign_id: campaignId },
         suggested_task: displayTask(`Diagnose non-bid delivery blocker on ${name}`, 'Automated bidding means CPC changes cannot fix zero delivery.', `campaign_id=${campaignId}; bidding_strategy_type=${strategy}`),
+        prepare_actions: [],
+      });
+    }
+  }
+
+  for (const usage of listUsage.values()) {
+    const list = usage.list;
+    const listName = list?.name ?? usage.resourceName;
+    const size = list?.size_for_display === undefined ? undefined : Number(list.size_for_display);
+    const searchSize = list?.size_for_search === undefined ? undefined : Number(list.size_for_search);
+    const membershipDays = list?.membership_life_span === undefined ? undefined : Number(list.membership_life_span);
+    const liveCampaigns = usage.campaigns.filter((campaign) => campaign.enabled);
+    const usedByLive = liveCampaigns.length > 0;
+    const campaignNames = usage.campaigns.map((campaign) => campaign.name).join(', ');
+    const campaignIds = usage.campaigns.map((campaign) => campaign.id).join(',');
+    const scope = usedByLive ? '' : ' (every campaign using this list is paused, so nothing is being lost right now)';
+    const entity = `user list ${listName}`;
+    const usageMetrics = {
+      campaigns: usage.campaigns.length,
+      enabled_campaigns: liveCampaigns.length,
+      campaign_ids: campaignIds,
+    };
+
+    audience_coverage.push({
+      user_list: listName,
+      campaigns: usage.campaigns.map((campaign) => campaign.name),
+      enabled_campaigns: liveCampaigns.length,
+      size_for_display: size ?? 'unknown',
+      size_for_search: searchSize ?? 'unknown',
+      eligible_for_display: list?.eligible_for_display ?? 'unknown',
+      membership_life_span_days: membershipDays ?? 'unknown',
+    });
+
+    const displaySizeUnreported = size === 0 && list?.eligible_for_display !== false && (searchSize ?? 0) >= t.minDisplayListSize;
+
+    if (displaySizeUnreported) {
+      findings.push({
+        code: 'display_size_not_reported',
+        severity: 'info',
+        entity,
+        observation: `Google reports 0 users for Display but ${searchSize} for Search and still marks the list eligible for Display. The Display figure is not populated for this list type, so it is not evidence of a delivery blocker — do not conclude the audience is empty from it.`,
+        metrics: { ...usageMetrics, size_for_display: 0, size_for_search: searchSize ?? 0 },
+        suggested_task: displayTask(`Verify Display reach for list: ${listName}`, 'Display list size is not reported by the API; reach must be checked in the UI audience manager.', `user_list=${listName}; campaign_ids=${campaignIds}; size_for_search=${searchSize}`),
+        prepare_actions: [],
+      });
+    } else if (size !== undefined && size < t.minDisplayListSize) {
+      findings.push({
+        code: 'audience_below_display_minimum',
+        severity: usedByLive ? 'critical' : 'info',
+        entity,
+        observation: `List has ${size} users for Display, below the ~${t.minDisplayListSize} needed to serve — this blocks delivery regardless of bid or budget${scope}. Used by: ${campaignNames}.`,
+        metrics: { ...usageMetrics, size_for_display: size, minimum: t.minDisplayListSize, size_for_search: searchSize ?? 0 },
+        suggested_task: displayTask(`Grow or replace remarketing list: ${listName}`, 'Remarketing list is below the Display minimum size.', `user_list=${listName}; campaign_ids=${campaignIds}; size=${size}`),
+        prepare_actions: [],
+      });
+    }
+
+    if (list?.eligible_for_display === false) {
+      findings.push({
+        code: 'audience_not_eligible_for_display',
+        severity: usedByLive ? 'critical' : 'info',
+        entity,
+        observation: `List is not eligible for Display — check the tag/source and membership rules; Display cannot serve to it${scope}. Used by: ${campaignNames}.`,
+        metrics: usageMetrics,
+        suggested_task: displayTask(`Restore Display eligibility for list: ${listName}`, 'Remarketing list is not eligible for the Display network.', `user_list=${listName}; campaign_ids=${campaignIds}`),
+        prepare_actions: [],
+      });
+    }
+
+    if (
+      membershipDays !== undefined && membershipDays > 0 && membershipDays < t.shortMembershipDays
+      && size !== undefined && size < t.minDisplayListSize * 10 && !displaySizeUnreported
+    ) {
+      findings.push({
+        code: 'short_membership_window',
+        severity: usedByLive ? 'warning' : 'info',
+        entity,
+        observation: `Membership lasts ${membershipDays}d on a list of ${size} users — the audience drains faster than it refills${scope}.`,
+        metrics: { ...usageMetrics, membership_life_span_days: membershipDays, size_for_display: size },
+        suggested_task: displayTask(`Review membership window on list: ${listName}`, 'Short membership duration keeps the remarketing list too small to serve.', `user_list=${listName}; campaign_ids=${campaignIds}; membership_days=${membershipDays}`),
         prepare_actions: [],
       });
     }
