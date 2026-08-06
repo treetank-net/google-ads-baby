@@ -17,6 +17,35 @@ mirror-github:
         exit 1
       fi
     - git checkout -B master "$CI_COMMIT_SHA"
-    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master:master
-    - git push --force "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git" master:main
-    - git push --force --tags "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git"
+    - |
+      git remote remove gh 2>/dev/null || true
+      git remote add gh "https://${GITHUB_TREETANK_TOKEN}@github.com/treetank-net/google-ads-baby.git"
+
+      # A release is pushed to GitHub by hand as well, so this job often runs with
+      # nothing left to do. GitHub can then reject master:main with "cannot lock ref
+      # ... is at <sha> but expected <older sha>": the ref already holds the target
+      # commit while GitHub still reports the value from the concurrent push. Skip
+      # when the ref is already there, and treat a rejection as transient.
+      mirror_ref() {
+        target="$1"
+        attempt=1
+        while [ "$attempt" -le 3 ]; do
+          remote_sha="$(git ls-remote gh "refs/heads/${target}" 2>/dev/null | awk '{print $1}')"
+          if [ "$remote_sha" = "$CI_COMMIT_SHA" ]; then
+            echo "${target} is already at ${CI_COMMIT_SHA} — nothing to mirror."
+            return 0
+          fi
+          if git push --force gh "master:${target}"; then
+            return 0
+          fi
+          echo "Pushing master:${target} failed (attempt ${attempt}/3); retrying in $((attempt * 10))s." >&2
+          sleep $((attempt * 10))
+          attempt=$((attempt + 1))
+        done
+        echo "Could not mirror master:${target} to GitHub after 3 attempts." >&2
+        return 1
+      }
+
+      mirror_ref master
+      mirror_ref main
+    - git push --force --tags gh
