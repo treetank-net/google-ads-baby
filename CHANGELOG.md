@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.20.2
+
+`prepare_budget_change` was showing the user a "before" amount it had never verified.
+
+### Fixed
+- **The budget preview took the current amount on the model's word.** Asked to change a budget that is actually 1 unit while being told it was 50, the tool previewed `50.00 PLN → 2.00 PLN (25.0x less)` — a cut, where the account was in fact about to get a 2x raise. Reproduced on a live account, not in theory. The tool now reads the amount from the account (`loadBudgetState()`) and previews that; `current_budget_amount` became optional and is only a cross-check, with a warning when it disagrees with what the account reports.
+- **The one tool that mutates a budget directly by `budget_id` never mentioned sharing.** It now carries the same `sharedBudgetWarning()` as `prepare_campaign_update`, and lists the campaigns on that budget when more than one is attached — which is exactly the case where the caller cannot see the blast radius from the campaign they started at.
+
 ## v0.20.1
 
 First release driven by running `prepare_*` against a live account instead of synthetic rows. Eight

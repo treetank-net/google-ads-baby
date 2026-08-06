@@ -440,6 +440,59 @@ export async function loadCampaignState(cfg: AdsConfig, customerId: string, camp
   };
 }
 
+export interface BudgetState {
+  budgetId: string;
+  name: string;
+  amountMicros?: number;
+  explicitlyShared?: boolean;
+  referenceCount?: number;
+  campaignNames: string[];
+}
+
+export async function loadBudgetState(cfg: AdsConfig, customerId: string, budgetId: string): Promise<BudgetState | null> {
+  const normalizedBudgetId = normalizeResourceId(budgetId);
+  const rows = await executeGaql(cfg, customerId, `
+    SELECT
+      campaign_budget.id,
+      campaign_budget.name,
+      campaign_budget.amount_micros,
+      campaign_budget.explicitly_shared,
+      campaign_budget.reference_count,
+      campaign.name,
+      campaign.status
+    FROM campaign
+    WHERE campaign_budget.id = ${normalizedBudgetId}
+      AND campaign.status != 'REMOVED'
+  `) as any[];
+  const budgetRows = await executeGaql(cfg, customerId, `
+    SELECT
+      campaign_budget.id,
+      campaign_budget.name,
+      campaign_budget.amount_micros,
+      campaign_budget.explicitly_shared,
+      campaign_budget.reference_count
+    FROM campaign_budget
+    WHERE campaign_budget.id = ${normalizedBudgetId}
+    LIMIT 1
+  `) as any[];
+  const budget = budgetRows[0]?.campaign_budget ?? rows[0]?.campaign_budget;
+  if (!budget) return null;
+  return {
+    budgetId: String(budget.id ?? normalizedBudgetId),
+    name: String(budget.name ?? ''),
+    amountMicros: budget.amount_micros === undefined ? undefined : Number(budget.amount_micros),
+    explicitlyShared: budget.explicitly_shared,
+    referenceCount: budget.reference_count === undefined ? undefined : Number(budget.reference_count),
+    campaignNames: rows.map((row) => String(row.campaign?.name ?? '')).filter(Boolean),
+  };
+}
+
+export function statedAmountMismatchWarning(statedMicros: number | undefined, actualMicros: number | undefined, currency: string): string | null {
+  if (statedMicros === undefined || actualMicros === undefined) return null;
+  if (statedMicros === actualMicros) return null;
+  return `Warning: the current amount was given as ${formatAmountExact(statedMicros, currency)}, but the account reports ${formatAmountExact(actualMicros, currency)}. The preview above uses the value read from the account.`;
+}
+
 export interface AdState {
   adId: string;
   adGroupId: string;

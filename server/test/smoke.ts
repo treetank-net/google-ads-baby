@@ -27,6 +27,7 @@ import {
   changeLine,
   microsChangeLine,
   textChangeLines,
+  statedAmountMismatchWarning,
   manualBiddingRequiredWarning,
   enumName,
   sharedBudgetWarning,
@@ -402,6 +403,15 @@ function testLimitHelpers() {
   assert('text changes mark what is added', textLines.some((l) => l.includes('+ Currency preview check')));
   assert('text changes mark what is kept', textLines.some((l) => l.includes('= Paused test ad')));
   assert('emptying a list is explicit', textChangeLines('Headlines', ['a'], []).join('\n').includes('(none)'));
+
+  // prepare_budget_change trusted the model for the "before" amount. Asking it to
+  // change a 1-unit budget while claiming 50 produced "50.00 -> 2.00 (25.0x less)":
+  // a preview showing a cut where the account gets a 2x raise.
+  assert('a stated amount matching the account needs no warning', statedAmountMismatchWarning(1_000_000, 1_000_000, 'PLN') === null);
+  assert('an unknown actual amount cannot be contradicted', statedAmountMismatchWarning(1_000_000, undefined, 'PLN') === null);
+  const mismatch = statedAmountMismatchWarning(50_000_000, 1_000_000, 'PLN') ?? '';
+  assert('a stated amount that differs from the account is called out', mismatch.includes('50.00 PLN') && mismatch.includes('1.00 PLN'));
+  assert('the mismatch warning says which value the preview used', mismatch.includes('read from the account'));
 
   assert('display ad text limits enforced', (validateResponsiveDisplayText(['a', 'b', 'c', 'd', 'e', 'f'], ['d']) ?? '').includes('1-5 headlines'));
   assert('valid display ad text passes', validateResponsiveDisplayText(['a'], ['d']) === null);

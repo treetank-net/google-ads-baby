@@ -43,7 +43,9 @@ import {
   manualBiddingRequiredWarning,
   sharedBudgetWarning,
   loadAdGroupState,
+  loadBudgetState,
   loadCampaignState,
+  statedAmountMismatchWarning,
 } from './write-helpers.js';
 import {
   buildSearchCampaignPayload,
@@ -107,12 +109,12 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_budget_change',
-    'Prepare a campaign budget change. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Prepare a campaign budget change. Reads the current amount from the account, so the preview shows the real before -> after, and warns when the budget is shared by several campaigns. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       budget_id: z.string().describe('Campaign budget resource ID'),
       campaign_name: z.string().describe('Campaign name (for preview)'),
-      current_budget_amount: z.number().describe('Current daily budget in account currency units (see list_accounts)'),
+      current_budget_amount: z.number().optional().describe('Optional: the daily budget you believe is set now, in account currency units. The preview always uses the amount read from the account; a mismatch is reported as a warning.'),
       new_budget_amount: z.number().describe('New daily budget in account currency units (see list_accounts)'),
       safe_word: safeWordSchema,
     },
@@ -125,10 +127,21 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       if (budgetError) return validationResult(budgetError);
       const newMicros = amountToMicros(new_budget_amount);
       const normalizedBudgetId = normalizeResourceId(budget_id);
-      const preview = [
+      const state = await loadBudgetState(cfg, normalizedCustomerId, normalizedBudgetId);
+      if (!state) return validationResult(`Budget ${normalizedBudgetId} was not found in account ${normalizedCustomerId}.`);
+      const statedMicros = current_budget_amount === undefined ? undefined : amountToMicros(current_budget_amount);
+      const lines = [
         `Change budget of campaign "${campaign_name}" (account ${normalizedCustomerId})`,
-        microsChangeLine('Daily budget', amountToMicros(current_budget_amount), newMicros, limits.currency),
-      ].join('\n');
+        microsChangeLine('Daily budget', state.amountMicros, newMicros, limits.currency),
+      ];
+      const mismatch = statedAmountMismatchWarning(statedMicros, state.amountMicros, limits.currency);
+      if (mismatch) lines.push(mismatch);
+      const budgetWarning = sharedBudgetWarning(state.referenceCount, state.explicitlyShared);
+      if (budgetWarning) lines.push(budgetWarning);
+      if (state.campaignNames.length > 1) {
+        lines.push(`Campaigns on this budget: ${state.campaignNames.join(', ')}`);
+      }
+      const preview = lines.join('\n');
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
