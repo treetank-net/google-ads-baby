@@ -120,9 +120,25 @@ Optional env vars:
 
 ```text
 GOOGLE_ADS_SAFETY_LEVEL
+GOOGLE_ADS_BABY_PROFILE
 GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS
 GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS
 ```
+
+## Tool Profiles
+
+`GOOGLE_ADS_BABY_PROFILE` decides which tools the server registers. The full manifest costs
+about 21 000 tokens of context in every session, so a narrower profile is worth setting when you
+only need part of the plugin. Restart the MCP server after changing it.
+
+| Profile | Tools | Manifest | What it covers |
+| --- | --- | --- | --- |
+| `full` (default) | 62 | ~21 200 tok | Everything |
+| `manage` | 38 | ~10 400 tok | Reads, diagnostics, and edits to existing entities (budget, bids, status, text, targeting, schedules). No creation, assets, cloning or `*_full` builders. |
+| `read` | 15 | ~3 800 tok | Reads, the five analysis reports, mutation history, auth. No `prepare_*`/`confirm_*` at all — mutation is impossible, not merely gated. |
+
+Claude Code loads MCP tool schemas on demand, so the saving there is small; Codex, Cursor and
+Claude Desktop read the whole manifest up front and benefit fully.
 
 For local end-to-end tests only, `GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1` enables the `confirm_safe_word` fallback. Keep it unset or `0` for normal use so write confirmation goes through client hooks.
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.19.0
+
+### Added
+- **`GOOGLE_ADS_BABY_PROFILE` limits which tools are registered.** The 62-tool manifest costs 21 248 tokens of context before anything is asked, in every session. Two smaller profiles are now available:
+
+  | Profile | Tools | Manifest | Saved |
+  | --- | --- | --- | --- |
+  | `full` (default) | 62 | 21 248 tok | — |
+  | `manage` | 38 | 10 352 tok | −10 896 |
+  | `read` | 15 | 3 783 tok | −17 465 |
+
+  `read` registers reads, the five analysis reports, mutation history and auth — no `prepare_*`, no `confirm_*`, so mutation is impossible rather than merely discouraged. `manage` adds edits to existing entities (budget, bids, status, text, targeting, schedules) but not creation, assets, cloning or the composite `*_full` builders. Default behaviour is unchanged.
+- The server tells the model which profile is active and what it excludes, and stops advertising tools it did not register — a `manage` session no longer reads instructions recommending `prepare_search_campaign_full`. Without this the model would look for a workaround instead of telling the user to change the profile.
+
+### Fixed
+- **The MCP server reported `version: 0.14.0`.** The string was hard-coded in `index.ts` and had not moved in four releases, so clients saw a version four releases stale. It now comes from `PLUGIN_VERSION`, and a test compares that constant against `package.json` so the drift cannot come back.
+
+### Changed
+- Suite is at 192 assertions. The profile tests cross-check `TOOL_PROFILE` against the registered tools in both directions; that check immediately caught eight unclassified tools and four map entries naming tools that do not exist.
+
 ## v0.18.0
 
 0.17.0 made responses compact but kept the old habit of *truncating* them. Truncation loses

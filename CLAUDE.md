@@ -20,7 +20,7 @@ confirm.ts                — token store (in-memory Map), safe word / confirm s
 history.ts                — audit log JSONL (~/.google-ads-baby/mutation-history.jsonl)
 errors.ts                 — formatError()
 validation.ts             — normalizeCustomerId(), normalizeResourceId(), requireCustomerId()
-constants.ts              — współdzielone stałe
+constants.ts              — współdzielone stałe + PLUGIN_VERSION (pilnowany testem vs package.json)
 client.ts                 — barrel re-export z client/
 
 client/
@@ -31,6 +31,7 @@ client/
   index.ts                — barrel re-export
 
 tools/
+  profile.ts              — GOOGLE_ADS_BABY_PROFILE: TOOL_PROFILE map, withProfile() gate, profileNotice()
   auth.ts                 — OAuth flow (auth_google_ads, setup_google_auth)
   read.ts                 — orchestrator: registerReadTools()
   read-helpers.ts         — schemas, query builders, pure functions
@@ -93,6 +94,15 @@ i przepuszczają nazwę bez zmian. Nigdy `String(row.campaign.status) === 'ENABL
 jest zawsze fałszywe na żywych danych i **testy syntetyczne go nie wyłapią**, bo w testach
 podaje się nazwy. Nowy test na danych z GAQL musi karmić analizator liczbami
 (patrz `display: numeric ...` w `test/smoke.ts`).
+
+**Nowy tool musi trafić do `TOOL_PROFILE`:**
+`tools/profile.ts` klasyfikuje **każdy** tool jako `read` / `manage` / `full`. Test w smoke
+porównuje mapę z listą faktycznie zarejestrowanych toolów w obie strony, więc nowy tool oblewa
+testy, dopóki nie zostanie sklasyfikowany, a literówka w nazwie wychodzi od razu (przy pierwszej
+implementacji mapy osiem toolów wypadło, a cztery nazwy w mapie nie istniały). `isToolAllowed`
+przepuszcza nieznaną nazwę — zawodzimy w stronę widoczności, nie cichego ukrycia; test kompletności
+jest tym, co pilnuje reszty. Instrukcje serwera muszą być spójne z profilem: przy `manage`/`read`
+nie wolno reklamować toolów, których nie zarejestrowano.
 
 **Nie obcinaj — paginuj:**
 Read tool, który może zwrócić dużo wierszy, **nie** obcina wyniku do stałej liczby. Przepuszcza
@@ -190,6 +200,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
+- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 62 tools), `manage` (38 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 248 to 10 352 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 

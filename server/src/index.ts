@@ -4,27 +4,37 @@ import { configFromEnv } from './config.js';
 import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerAuthTools } from './tools/auth.js';
+import { withProfile, profileNotice } from './tools/profile.js';
+import { PLUGIN_VERSION } from './constants.js';
 
 async function main() {
+  const cfg = await configFromEnv();
+  const notice = profileNotice(cfg.toolProfile);
   const server = new McpServer({
     name: 'google-ads-baby',
-    version: '0.14.0',
+    version: PLUGIN_VERSION,
   }, {
     instructions: [
-      'Work fast: prefer the composite *_full creation tools over chains of granular prepare_* calls.',
-      'To create a Search campaign use prepare_search_campaign_full (budget + campaign + ad groups + keywords + responsive search ads + extensions in ONE atomic transaction and ONE confirmation). Pass a preset (e.g. "ecommerce-search-pl" or "leadgen-search-pl") and only the variable fields; the preset fills sane defaults (exact+phrase match, geo PL, language PL, bidding). Do NOT call prepare_search_campaign + prepare_ad_group + prepare_keywords separately for a brand-new campaign.',
-      'Similarly prefer prepare_display_campaign_full and prepare_performance_max_campaign_full for whole Display / Performance Max campaigns.',
-      'When creating several campaigns at once, call the prepare_* tools for all of them first, then ask the user to confirm once, then run confirm_all_mutations with all tokens — a single confirmation covers the whole batch.',
-      'New campaigns are created PAUSED by default. After creation, ask the user whether to enable them.',
-      'Each prepare_* returns a preview and an LLM-invented safe word: show the full preview to the user and ask them to reply with the safe word before calling confirm_mutation / confirm_all_mutations. Never call prepare_* and confirm in the same turn.',
+      ...(notice ? [notice] : []),
+      ...(cfg.toolProfile === 'full' ? [
+        'Work fast: prefer the composite *_full creation tools over chains of granular prepare_* calls.',
+        'To create a Search campaign use prepare_search_campaign_full (budget + campaign + ad groups + keywords + responsive search ads + extensions in ONE atomic transaction and ONE confirmation). Pass a preset (e.g. "ecommerce-search-pl" or "leadgen-search-pl") and only the variable fields; the preset fills sane defaults (exact+phrase match, geo PL, language PL, bidding). Do NOT call prepare_search_campaign + prepare_ad_group + prepare_keywords separately for a brand-new campaign.',
+        'Similarly prefer prepare_display_campaign_full and prepare_performance_max_campaign_full for whole Display / Performance Max campaigns.',
+        'New campaigns are created PAUSED by default. After creation, ask the user whether to enable them.',
+      ] : []),
+      ...(cfg.toolProfile === 'read' ? [] : [
+        'When preparing several changes at once, call the prepare_* tools for all of them first, then ask the user to confirm once, then run confirm_all_mutations with all tokens — a single confirmation covers the whole batch.',
+        'Each prepare_* returns a preview and an LLM-invented safe word: show the full preview to the user and ask them to reply with the safe word before calling confirm_mutation / confirm_all_mutations. Never call prepare_* and confirm in the same turn.',
+      ]),
+      'List-shaped read tools return tab-separated tables and are paginated by response size: the response says which page of how many, and page: N asks for the next slice. Nothing is silently dropped.',
     ].join(' '),
   });
 
-  const cfg = await configFromEnv();
+  const target = withProfile(server, cfg.toolProfile);
 
-  registerAuthTools(server, cfg);
-  registerReadTools(server, cfg);
-  registerWriteTools(server, cfg);
+  registerAuthTools(target, cfg);
+  registerReadTools(target, cfg);
+  registerWriteTools(target, cfg);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

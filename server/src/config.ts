@@ -2,6 +2,8 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET } from './constants.js';
 
+import { normalizeProfile, type ToolProfile } from './tools/profile.js';
+
 export interface AdsConfig {
   clientId: string;
   clientSecret: string;
@@ -9,6 +11,7 @@ export interface AdsConfig {
   refreshToken: string;
   loginCustomerId: string;
   safetyLevel: 'strict' | 'standard' | 'off';
+  toolProfile: ToolProfile;
   mutationTokenTtlSeconds: string;
   confirmStateTtlSeconds: string;
 }
@@ -20,6 +23,7 @@ interface SavedConfig {
   loginCustomerId?: string;
   refreshToken?: string;
   safetyLevel?: 'strict' | 'standard' | 'off';
+  toolProfile?: ToolProfile;
   mutationTokenTtlSeconds?: string;
   confirmStateTtlSeconds?: string;
   savedAt?: string;
@@ -82,6 +86,7 @@ export async function configFromEnv(): Promise<AdsConfig> {
     refreshToken: env('GOOGLE_ADS_REFRESH_TOKEN') || saved.refreshToken || '',
     loginCustomerId: env('GOOGLE_ADS_MCC_ID') || saved.loginCustomerId || '',
     safetyLevel: safetyLevel as AdsConfig['safetyLevel'],
+    toolProfile: normalizeProfile(env('GOOGLE_ADS_BABY_PROFILE') || saved.toolProfile),
     mutationTokenTtlSeconds,
     confirmStateTtlSeconds,
   };

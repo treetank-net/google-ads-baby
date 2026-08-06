@@ -38,6 +38,11 @@ import {
   MICROS,
 } from '../src/tools/analysis-helpers.js';
 import { enums } from 'google-ads-api';
+import { registerReadTools } from '../src/tools/read.js';
+import { registerAuthTools } from '../src/tools/auth.js';
+import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
+import { PLUGIN_VERSION } from '../src/constants.js';
+import { readFileSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
 
 let passed = 0;
@@ -181,6 +186,74 @@ function testAnalysis() {
 // Fields that carry an amount for preview only and never reach a mutation,
 // so a safety cap on them would be meaningless.
 const CAP_SWEEP_EXEMPT = new Set(['prepare_budget_change.current_budget_pln']);
+
+const SMOKE_CFG = {
+  clientId: '',
+  clientSecret: '',
+  developerToken: '',
+  refreshToken: '',
+  loginCustomerId: '',
+  safetyLevel: 'standard',
+  toolProfile: 'full',
+  mutationTokenTtlSeconds: '',
+  confirmStateTtlSeconds: '',
+} as any;
+
+function registeredForProfile(profile: ToolProfile): Record<string, any> {
+  const server = new McpServer({ name: 'smoke', version: '0.0.0' });
+  const target = withProfile(server, profile);
+  const cfg = { ...SMOKE_CFG, toolProfile: profile };
+  registerAuthTools(target, cfg);
+  registerReadTools(target, cfg);
+  registerWriteTools(target, cfg);
+  return (server as any)._registeredTools as Record<string, any>;
+}
+
+function testProfiles() {
+  console.log('\n--- Tool profiles ---');
+
+  assert('unset profile defaults to full', normalizeProfile(undefined) === 'full');
+  assert('unknown profile value falls back to full', normalizeProfile('everything') === 'full');
+  assert('profile value is case- and space-insensitive', normalizeProfile('  Read ') === 'read');
+
+  const full = registeredForProfile('full');
+  const manage = registeredForProfile('manage');
+  const read = registeredForProfile('read');
+
+  const names = Object.keys(full);
+  const unclassified = names.filter((n) => !(n in TOOL_PROFILE));
+  assert('every registered tool is classified into a profile', unclassified.length === 0, unclassified.join(', '));
+  const stale = Object.keys(TOOL_PROFILE).filter((n) => !names.includes(n));
+  assert('the profile map has no entries for tools that no longer exist', stale.length === 0, stale.join(', '));
+
+  assert('full registers everything', Object.keys(full).length === names.length);
+  assert('manage registers fewer tools than full', Object.keys(manage).length < names.length);
+  assert('read registers fewer tools than manage', Object.keys(read).length < Object.keys(manage).length);
+
+  assert('read exposes no prepare_* tool', !Object.keys(read).some((n) => n.startsWith('prepare_')));
+  assert('read exposes no confirm_* tool', !Object.keys(read).some((n) => n.startsWith('confirm_')));
+  assert('read keeps the analysis tools', 'get_display_remarketing_diagnostics' in read && 'get_account_hygiene_report' in read);
+  assert('read keeps auth so the user can still connect', 'setup_google_auth' in read);
+  assert('read keeps mutation history for auditing', 'get_mutation_history' in read);
+
+  assert('manage keeps the edit tools the field asked for', ['prepare_ad_group_update', 'prepare_campaign_update', 'prepare_ad_update', 'prepare_budget_change'].every((n) => n in manage));
+  assert('manage keeps the confirm kernel', ['confirm_mutation', 'confirm_all_mutations', 'confirm_safe_word', 'get_safety_setup'].every((n) => n in manage));
+  assert('manage excludes the composite builders', !Object.keys(manage).some((n) => n.endsWith('_full')));
+  assert('manage excludes creation tools', !('prepare_search_campaign' in manage) && !('prepare_ad_group' in manage) && !('prepare_responsive_search_ad' in manage));
+  assert('manage excludes asset tools', !Object.keys(manage).some((n) => n.includes('asset')));
+  assert('manage excludes cloning', !('prepare_clone_entity' in manage));
+
+  assert('a manage-level tool is allowed under full', isToolAllowed('prepare_budget_change', 'full'));
+  assert('a full-level tool is refused under manage', !isToolAllowed('prepare_search_campaign_full', 'manage'));
+  assert('an unknown tool name is allowed rather than silently hidden', isToolAllowed('some_future_tool', 'read'));
+
+  assert('read profile states mutations are impossible', profileNotice('read').includes('mutations are impossible'));
+  assert('manage profile names the env var needed to unlock creation', profileNotice('manage').includes('GOOGLE_ADS_BABY_PROFILE=full'));
+  assert('full profile adds no notice', profileNotice('full') === '');
+
+  const pkgVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+  assert('PLUGIN_VERSION matches package.json', PLUGIN_VERSION === pkgVersion, `constant=${PLUGIN_VERSION} package=${pkgVersion}`);
+}
 
 function registeredWriteTools(): Record<string, any> {
   const server = new McpServer({ name: 'smoke', version: '0.0.0' });
@@ -572,6 +645,7 @@ async function main() {
   testAnalysis();
   testFormat();
   testPagination();
+  testProfiles();
   testDisplayRemarketing();
   testLimitHelpers();
   testToolContract();
