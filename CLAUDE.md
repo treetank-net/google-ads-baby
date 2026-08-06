@@ -33,6 +33,7 @@ client/
 tools/
   profile.ts              — GOOGLE_ADS_BABY_PROFILE: TOOL_PROFILE map, withProfile() gate, profileNotice()
   amounts.ts              — waluta i kwoty: CURRENCY_UNIT_SCALE, resolveAmountLimits()/loadAmountLimits(), formatAmount()/formatUnits(), amountToMicros(), konfigurowalne capy
+  targeting.ts            — resolveTargeting(): kody ISO kraju/języka → criterion IDs, cache w procesie, walidacja targetable
   auth.ts                 — OAuth flow (auth_google_ads, setup_google_auth)
   read.ts                 — orchestrator: registerReadTools()
   read-helpers.ts         — schemas, query builders, pure functions
@@ -141,6 +142,28 @@ w `analysis-helpers.ts` nazwa kończy się na `Units` i `scaleUnitThresholds()` 
 `CURRENCY_UNIT_SCALE`; proporcje i liczby dni **nie** mają tego sufiksu i nie są skalowane. Skala
 jest przybliżeniem rzędu wielkości waluty, nie kursem — jej zadaniem jest, żeby cap i próg znaczyły
 podobną ilość pieniędzy, nie żeby przeliczać wartość.
+
+**Rynek zawsze od użytkownika — nigdy kraj ani język na sztywno:**
+Presety miały `GEO_POLAND = '2616'` i `LANG_POLISH = '1045'`, więc każda kampania z presetu leciała
+na Polskę — w narzędziu instalowanym przez kogokolwiek. Do tego `1045` to **Afar**, nie polski
+(polski to `1030`); uratowało nas tylko to, że Afar jest nietargetowalny i API krzyknęło. Literówka
+w język targetowalny stworzyłaby kampanię po cichu w złym języku. Dlatego: **żaden preset, schemat
+ani default nie zawiera kraju ani języka**. Kompozyty wymagają `locations` i `languages` (kod ISO
+albo numeryczne ID w jednym polu — dwa pola rozdmuchałyby manifest), a brak wartości to błąd
+walidacji, nie ciche PL. Rozwiązywanie kodów idzie przez `resolveTargeting()` (`tools/targeting.ts`),
+które sprawdza `language_constant.targetable` **przed** utworzeniem tokenu, żeby zły rynek kosztował
+retry, a nie zużyte potwierdzenie. Preview pokazuje etykiety (`Poland (PL)`), nie cyfry — po to, żeby
+rozjazd między tym, co user przeczytał, a tym, co poleci do API, dało się zobaczyć. Czyste funkcje
+(`indexLanguageRows`/`matchLocations`/buildery) są oddzielone od wywołań GAQL i pokryte w smoke.
+**GAQL nie ma `OR` ani nawiasów grupujących** — alternatywa to dwa zapytania; test pilnuje, że żaden
+generowany string nie zawiera ` OR `.
+
+**Skille pluginu (`skills/`):**
+Katalog `skills/<nazwa>/SKILL.md` jest wykrywany automatycznie — nie deklaruje się go w
+`plugin.json`. Skill to wiedza dla modelu, której nie da się wcisnąć w opis toola: `skills/gaql`
+opisuje pułapki GAQL (brak `OR`/`JOIN`/`GROUP BY`, enumy jako liczby, micros, mnożenie wierszy przez
+`segments.*`). Każdy defekt złapany na żywym koncie, który wynikał z niewiedzy o API — a nie z buga
+w kodzie — należy tutaj, nie do kolejnego zdania w instrukcjach serwera.
 
 **Konwencje:**
 - Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
@@ -333,6 +356,8 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 - **Scope: read + manage + create** — LLM tworzy kampanie (często na wzór istniejących),
   zarządza istniejącymi, odczytuje dane. Cache na template'y kampanii.
 - **Bundle CJS, nie npm publish** — plugin dystrybuowany z GitHub marketplace, `bundle.cjs` w repo.
-  npm package niepotrzebny (był opublikowany jako `@treetank/google-ads-baby`, unpublished).
+  Paczka `@treetank/google-ads-baby` nadal istnieje na npm, ale stoi na 0.3.0 i **nie jest wydawana** —
+  używa jej tylko wrapper Codeksa (`npx`). Kto podłączy ją jako serwer MCP, dostanie wersję sprzed
+  kilkunastu wydań (30 tooli zamiast 62); to nie jest kanał dystrybucji.
 - **Custom OAuth app** — user może podać własne Client ID/Secret w flow autoryzacji (/open page).
   Domyślna appka jest wbudowana (desktop type, publiczne credentials per Google docs).

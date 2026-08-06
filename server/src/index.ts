@@ -18,7 +18,7 @@ async function main() {
       ...(notice ? [notice] : []),
       ...(cfg.toolProfile === 'full' ? [
         'Work fast: prefer the composite *_full creation tools over chains of granular prepare_* calls.',
-        'To create a Search campaign use prepare_search_campaign_full (budget + campaign + ad groups + keywords + responsive search ads + extensions in ONE atomic transaction and ONE confirmation). Pass a preset (e.g. "ecommerce-search-pl" or "leadgen-search-pl") and only the variable fields; the preset fills sane defaults (exact+phrase match, geo PL, language PL, bidding). Do NOT call prepare_search_campaign + prepare_ad_group + prepare_keywords separately for a brand-new campaign.',
+        'To create a Search campaign use prepare_search_campaign_full (budget + campaign + ad groups + keywords + responsive search ads + extensions in ONE atomic transaction and ONE confirmation). Pass a preset (e.g. "ecommerce-search" or "leadgen-search") and only the variable fields; the preset fills match types and bidding. Presets carry no country or language: ask the user which markets the campaign targets and pass locations and languages as ISO codes (locations: ["PL"], languages: ["pl"]). Never assume a market. Do NOT call prepare_search_campaign + prepare_ad_group + prepare_keywords separately for a brand-new campaign.',
         'Similarly prefer prepare_display_campaign_full and prepare_performance_max_campaign_full for whole Display / Performance Max campaigns.',
         'New campaigns are created PAUSED by default. After creation, ask the user whether to enable them.',
       ] : []),

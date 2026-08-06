@@ -8,10 +8,7 @@ import { MICROS_PER_UNIT, formatAmount } from './amounts.js';
 
 const DEFAULT_CPC_MICROS = 1 * MICROS_PER_UNIT;
 
-const GEO_POLAND = '2616';
-const LANG_POLISH = '1045';
-
-export type SearchPreset = 'ecommerce-search-pl' | 'leadgen-search-pl' | 'none';
+export type SearchPreset = 'ecommerce-search' | 'leadgen-search' | 'none';
 
 interface PresetDefaults {
   matchTypes: Array<'EXACT' | 'PHRASE' | 'BROAD'>;
@@ -30,27 +27,26 @@ const GLOBAL_DEFAULTS: PresetDefaults = {
 };
 
 const SEARCH_PRESETS: Record<Exclude<SearchPreset, 'none'>, PresetDefaults> = {
-  'ecommerce-search-pl': {
+  'ecommerce-search': {
     matchTypes: ['EXACT', 'PHRASE'],
     bidding: { type: 'MAXIMIZE_CONVERSION_VALUE' },
-    locationCriterionIds: [GEO_POLAND],
-    languageCriterionIds: [LANG_POLISH],
+    locationCriterionIds: [],
+    languageCriterionIds: [],
     positiveGeoTargetType: 'PRESENCE',
   },
-  'leadgen-search-pl': {
+  'leadgen-search': {
     matchTypes: ['EXACT', 'PHRASE'],
     bidding: { type: 'MAXIMIZE_CONVERSIONS' },
-    locationCriterionIds: [GEO_POLAND],
-    languageCriterionIds: [LANG_POLISH],
+    locationCriterionIds: [],
+    languageCriterionIds: [],
     positiveGeoTargetType: 'PRESENCE',
   },
 };
 
-export function listSearchPresets(): Array<{ id: string; bidding: string; geo: string; matchTypes: string }> {
+export function listSearchPresets(): Array<{ id: string; bidding: string; matchTypes: string }> {
   return Object.entries(SEARCH_PRESETS).map(([id, p]) => ({
     id,
     bidding: p.bidding.type,
-    geo: `${p.locationCriterionIds.join(',')} (${p.positiveGeoTargetType})`,
     matchTypes: p.matchTypes.join('+'),
   }));
 }
@@ -119,6 +115,33 @@ export function buildSearchCampaignPayload(input: SearchCampaignFullInput): Sear
   };
 }
 
+export interface TargetingLabels {
+  locations: Array<{ id: string; label: string }>;
+  languages: Array<{ id: string; label: string }>;
+}
+
+function criterionList(ids: string[], labels?: Array<{ id: string; label: string }>): string {
+  if (!labels?.length) return ids.join(', ');
+  const byId = new Map(labels.map((entry) => [entry.id, entry.label]));
+  return ids.map((id) => byId.get(id) ?? id).join(', ');
+}
+
+function targetingLines(
+  locationIds: string[],
+  languageIds: string[],
+  positiveGeoTargetType: string,
+  targeting?: TargetingLabels,
+): string[] {
+  const lines: string[] = [];
+  if (locationIds.length) {
+    lines.push(`Geo targets: ${criterionList(locationIds, targeting?.locations)} — ${positiveGeoTargetType}`);
+  }
+  if (languageIds.length) {
+    lines.push(`Languages: ${criterionList(languageIds, targeting?.languages)}`);
+  }
+  return lines;
+}
+
 function formatBidding(bidding: SearchCampaignBidding, currency: string): string {
   switch (bidding.type) {
     case 'TARGET_CPA':
@@ -135,15 +158,19 @@ function formatBidding(bidding: SearchCampaignBidding, currency: string): string
   }
 }
 
-export function formatSearchCampaignPreview(customerId: string, p: SearchCampaignFullPayload, currency: string): string {
+export function formatSearchCampaignPreview(
+  customerId: string,
+  p: SearchCampaignFullPayload,
+  currency: string,
+  targeting?: TargetingLabels,
+): string {
   const amount = (micros: number) => formatAmount(micros, currency);
   const lines: string[] = [];
   lines.push(`Create SEARCH campaign "${p.campaignName}" on account ${customerId}`);
   lines.push(`Status: ${p.status}`);
   lines.push(`Daily budget: ${amount(p.dailyBudgetMicros)}`);
   lines.push(`Bidding: ${formatBidding(p.bidding, currency)}`);
-  if (p.locationCriterionIds.length) lines.push(`Geo targets: ${p.locationCriterionIds.join(', ')} (${p.positiveGeoTargetType})`);
-  if (p.languageCriterionIds.length) lines.push(`Languages: ${p.languageCriterionIds.join(', ')}`);
+  lines.push(...targetingLines(p.locationCriterionIds, p.languageCriterionIds, p.positiveGeoTargetType, targeting));
   if (p.campaignNegatives.length) {
     lines.push(`Campaign negatives: ${p.campaignNegatives.map((n) => `${n.text} [${n.matchType}]`).join(', ')}`);
   }
@@ -186,8 +213,8 @@ export function buildDisplayCampaignPayload(input: DisplayCampaignFullInput): Di
     dailyBudgetMicros: input.dailyBudgetMicros,
     status: input.status ?? 'PAUSED',
     bidding: input.bidding ?? { type: 'MANUAL_CPC' },
-    locationCriterionIds: input.locationCriterionIds ?? [GEO_POLAND],
-    languageCriterionIds: input.languageCriterionIds ?? [LANG_POLISH],
+    locationCriterionIds: input.locationCriterionIds ?? [],
+    languageCriterionIds: input.languageCriterionIds ?? [],
     positiveGeoTargetType: input.positiveGeoTargetType ?? 'PRESENCE',
     adGroup: {
       name: input.adGroup.name,
@@ -198,15 +225,19 @@ export function buildDisplayCampaignPayload(input: DisplayCampaignFullInput): Di
   };
 }
 
-export function formatDisplayCampaignPreview(customerId: string, p: DisplayCampaignFullPayload, currency: string): string {
+export function formatDisplayCampaignPreview(
+  customerId: string,
+  p: DisplayCampaignFullPayload,
+  currency: string,
+  targeting?: TargetingLabels,
+): string {
   const amount = (micros: number) => formatAmount(micros, currency);
   const lines: string[] = [];
   lines.push(`Create DISPLAY campaign "${p.campaignName}" on account ${customerId}`);
   lines.push(`Status: ${p.status}`);
   lines.push(`Daily budget: ${amount(p.dailyBudgetMicros)}`);
   lines.push(`Bidding: ${formatBidding(p.bidding, currency)}`);
-  if (p.locationCriterionIds.length) lines.push(`Geo targets: ${p.locationCriterionIds.join(', ')} (${p.positiveGeoTargetType})`);
-  if (p.languageCriterionIds.length) lines.push(`Languages: ${p.languageCriterionIds.join(', ')}`);
+  lines.push(...targetingLines(p.locationCriterionIds, p.languageCriterionIds, p.positiveGeoTargetType, targeting));
   lines.push('');
   lines.push(`Ad group: "${p.adGroup.name}" — CPC ${amount(p.adGroup.cpcBidMicros)}`);
   lines.push(`Responsive display ad: ${p.ad.headlines.length} headlines, ${p.ad.descriptions.length} descriptions, business "${p.ad.businessName}" → ${p.ad.finalUrl}`);

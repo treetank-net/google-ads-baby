@@ -8,6 +8,20 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerWriteTools } from '../src/tools/write.js';
 import { updatedFieldNames } from '../src/history.js';
 import {
+  indexLanguageRows,
+  indexLocationRows,
+  matchLanguages,
+  matchLocations,
+  buildCountryQuery,
+  buildGeoIdQuery,
+} from '../src/tools/targeting.js';
+import {
+  listSearchPresets,
+  buildSearchCampaignPayload,
+  buildDisplayCampaignPayload,
+  formatSearchCampaignPreview,
+} from '../src/tools/presets.js';
+import {
   resolveAmountLimits,
   currencyUnitScale,
   formatAmount,
@@ -731,6 +745,111 @@ function testDisplayRemarketing() {
   assert('enumLabel treats missing as empty', enumLabel(enums.CampaignStatus as any, undefined) === '');
 }
 
+function testTargeting() {
+  console.log('\n--- Targeting resolution (no hardcoded market) ---');
+
+  // 1045 is Afar, not Polish. A preset shipping a raw ID meant every PL campaign
+  // died at the API with CANNOT_TARGET_LANGUAGE, found only on a live account.
+  const languageRows = [
+    { language_constant: { id: 1030, code: 'pl', name: 'Polish', targetable: true } },
+    { language_constant: { id: 1021, code: 'cs', name: 'Czech', targetable: true } },
+    { language_constant: { id: 1045, code: 'aa', name: 'Afar', targetable: false } },
+  ];
+  const languages = indexLanguageRows(languageRows);
+
+  const byCode = matchLanguages(languages, ['pl']);
+  assert('an ISO language code resolves to its criterion ID', byCode.resolved[0]?.id === '1030', JSON.stringify(byCode));
+  assert('the resolved language is labelled for humans', byCode.resolved[0]?.label === 'Polish (pl)');
+
+  assert('an uppercase language code still resolves', matchLanguages(languages, ['PL']).resolved[0]?.id === '1030');
+  assert('a numeric language ID passes through', matchLanguages(languages, ['1021']).resolved[0]?.id === '1021');
+
+  const untargetable = matchLanguages(languages, ['aa']);
+  assert('an untargetable language is rejected before the API sees it', !!untargetable.error);
+  assert('the rejection names the language', untargetable.error?.includes('Afar') === true, untargetable.error);
+
+  const afarById = matchLanguages(languages, ['1045']);
+  assert('the old hardcoded 1045 is rejected by ID too', !!afarById.error, JSON.stringify(afarById));
+
+  const unknown = matchLanguages(languages, ['xx']);
+  assert('an unknown language code is rejected', !!unknown.error);
+  assert('duplicate languages collapse', matchLanguages(languages, ['pl', 'PL', '1030']).resolved.length === 1);
+
+  const locationRows = [
+    { geo_target_constant: { id: 2616, name: 'Poland', country_code: 'PL', target_type: 'Country' } },
+    { geo_target_constant: { id: 2203, name: 'Czechia', country_code: 'CZ', target_type: 'Country' } },
+    { geo_target_constant: { id: 1011969, name: 'Krakow', country_code: 'PL', target_type: 'City' } },
+  ];
+  const locations = indexLocationRows(locationRows);
+
+  assert('an ISO country code resolves', matchLocations(locations, ['PL']).resolved[0]?.id === '2616');
+  assert('a lowercase country code resolves', matchLocations(locations, ['cz']).resolved[0]?.id === '2203');
+  assert('a country is labelled with its code', matchLocations(locations, ['PL']).resolved[0]?.label === 'Poland (PL)');
+
+  const city = matchLocations(locations, ['1011969']);
+  assert('a numeric geo ID resolves to a city', city.resolved[0]?.id === '1011969');
+  assert('a city label carries its target type', city.resolved[0]?.label === 'Krakow (PL, City)', city.resolved[0]?.label);
+
+  // A city must not hijack its country code, or ["PL"] could silently mean Krakow.
+  assert('a city does not claim its country code', matchLocations(locations, ['PL']).resolved[0]?.id === '2616');
+  assert('an unknown country code is rejected', !!matchLocations(locations, ['ZZ']).error);
+
+  const query = buildCountryQuery(['PL']);
+  assert('the geo query asks for countries by code', query.includes("country_code IN ('PL')"));
+  assert('the geo query asks for explicit IDs', buildGeoIdQuery(['1011969']).includes('geoTargetConstants/1011969'));
+  // GAQL rejects OR and grouping parentheses in WHERE, so codes and IDs must be
+  // separate queries. Combining them cost a live round trip to find out.
+  assert('geo queries avoid OR, which GAQL rejects', !query.includes(' OR ') && !buildGeoIdQuery(['1']).includes(' OR '));
+
+  // The bug was a constant nobody could see. Presets must stay market-neutral.
+  for (const preset of listSearchPresets()) {
+    assert(`preset ${preset.id} carries no country in its name`, !/-(pl|de|cz|sk|hu|uk|us)$/.test(preset.id));
+  }
+  const searchPayload = buildSearchCampaignPayload({
+    preset: 'leadgen-search',
+    campaignName: 'x',
+    dailyBudgetMicros: MICROS_PER_UNIT,
+    finalUrl: 'https://example.com',
+    adGroups: [{ name: 'ag', keywords: [{ text: 'k' }], headlines: ['a', 'b', 'c'], descriptions: ['d', 'e'] }],
+  });
+  assert('a search preset defaults to no country', searchPayload.locationCriterionIds.length === 0);
+  assert('a search preset defaults to no language', searchPayload.languageCriterionIds.length === 0);
+
+  const displayPayload = buildDisplayCampaignPayload({
+    campaignName: 'x',
+    dailyBudgetMicros: MICROS_PER_UNIT,
+    adGroup: { name: 'ag' },
+    ad: {
+      businessName: 'b',
+      headlines: ['h'],
+      longHeadline: 'l',
+      descriptions: ['d'],
+      finalUrl: 'https://example.com',
+      marketingImageAssetIds: ['1'],
+      squareMarketingImageAssetIds: ['2'],
+      logoImageAssetIds: [],
+    },
+  });
+  assert('a display campaign defaults to no country', displayPayload.locationCriterionIds.length === 0);
+  assert('a display campaign defaults to no language', displayPayload.languageCriterionIds.length === 0);
+
+  const preview = formatSearchCampaignPreview('123', { ...searchPayload, locationCriterionIds: ['2616'], languageCriterionIds: ['1030'] }, 'PLN', {
+    locations: [{ id: '2616', label: 'Poland (PL)' }],
+    languages: [{ id: '1030', label: 'Polish (pl)' }],
+  });
+  assert('the preview names the country instead of an ID', preview.includes('Poland (PL)') && !preview.includes('2616'), preview);
+  assert('the preview names the language instead of an ID', preview.includes('Polish (pl)') && !preview.includes('1030'));
+
+  const tools = registeredWriteTools();
+  for (const toolName of ['prepare_search_campaign_full', 'prepare_display_campaign_full']) {
+    const fields = toolFieldNames(tools[toolName]);
+    assert(`${toolName} takes locations`, fields.includes('locations'));
+    assert(`${toolName} takes languages`, fields.includes('languages'));
+    assert(`${toolName} dropped location_criterion_ids`, !fields.includes('location_criterion_ids'));
+    assert(`${toolName} dropped language_criterion_ids`, !fields.includes('language_criterion_ids'));
+  }
+}
+
 async function main() {
   console.log('Smoke test: google-ads-baby MCP server\n');
 
@@ -751,6 +870,7 @@ async function main() {
   testAccountCurrency();
   testLimitHelpers();
   testToolContract();
+  testTargeting();
   await testCapEnforcement();
 
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);

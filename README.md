@@ -152,6 +152,32 @@ given and is not scaled.
 The cost thresholds inside the analysis reports (waste floors, zero-spend floors, the low-CPC
 floor in the Display diagnostics) are scaled the same way, and the report says so when it happens.
 
+## Geo and Language Targeting
+
+Campaign builders take `locations` and `languages`. Each accepts an **ISO code** or a **numeric
+criterion ID**, mixed freely:
+
+```json
+{ "locations": ["PL", "CZ"], "languages": ["pl", "cs"] }
+{ "locations": ["2616", "1012820"], "languages": ["1030"] }
+```
+
+Codes are resolved against the API and cached for the life of the server process. Languages are
+checked for `targetable` and a non-targetable one is rejected by name before anything is created;
+an unknown code is an error naming what was not found. Previews show resolved labels
+(`Poland (PL)`, `Polish (pl)`), not raw IDs.
+
+There is **no default market**. Presets carry match types and bidding only, so a composite builder
+called without `locations` and `languages` fails validation rather than guessing a country. Before
+0.21.0 the presets hardcoded Poland — with the wrong language ID, which is how this was found.
+
+## Bundled Skill
+
+The plugin ships a `gaql` skill (`skills/gaql/SKILL.md`) for writing queries for `execute_gaql`.
+It covers what GAQL does not support (`OR`, grouping parentheses, `JOIN`, `GROUP BY`, aggregate
+functions), enums arriving as numbers, micros, how `segments.*` multiplies rows, and a set of
+ready-made queries. Claude Code loads it on demand when a task involves GAQL.
+
 ## Tool Profiles
 
 `GOOGLE_ADS_BABY_PROFILE` decides which tools the server registers. The full manifest costs
@@ -216,7 +242,7 @@ Write preparation — campaigns, budgets, targeting:
 - `prepare_campaign_update` — Prepare an update to an existing campaign (name, status, daily budget, bidding strategy)
 - `prepare_demographic_bid_modifier` — Prepare setting bid modifiers for demographic criteria (age range / gender) on a campaign or ad group
 - `prepare_display_ad_group` — Prepare creation of a paused Display ad group under an existing campaign
-- `prepare_display_campaign_full` — Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting (defaults PL) + ad group + one responsive display ad (using existing uploaded image asset IDs)
+- `prepare_display_campaign_full` — Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad group + one responsive display ad (using existing uploaded image asset IDs)
 - `prepare_display_campaign` — Prepare creation of a paused Display campaign with a daily budget
 - `prepare_negative_topics` — Prepare creation of negative topic criteria at campaign level (excludes content categories from delivery)
 - `prepare_performance_max_campaign_full` — Prepare a COMPLETE Performance Max campaign in ONE atomic operation: budget + campaign (AI asset enhancements OFF by default) + asset group + inline text assets (headlines/long headlines/descriptions/business name) + linked existing image assets + optional audience signals

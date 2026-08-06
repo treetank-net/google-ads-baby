@@ -15,7 +15,6 @@ import {
   safeWordSchema,
   keywordMatchTypeSchema,
   campaignRefSchema,
-  criterionIdListSchema,
   campaignAssetFieldTypeSchema,
   adGroupCriterionResourceNameSchema,
   negativeTopicSchema,
@@ -55,6 +54,7 @@ import {
   buildPerformanceMaxPayload,
   formatPmaxCampaignPreview,
 } from './presets.js';
+import { resolveTargeting } from './targeting.js';
 
 export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
@@ -263,7 +263,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     'Prepare a COMPLETE Search campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad groups (each with keywords and a responsive search ad) + extensions (sitelinks/callouts/call). Optionally driven by a preset that fills sane defaults. Returns a SINGLE preview and ONE confirmation token — the user confirms once for the whole campaign. Prefer this over calling prepare_search_campaign + prepare_ad_group + prepare_keywords + ... separately; it is far faster (one model turn, one atomic API transaction, one confirm).',
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      preset: z.enum(['ecommerce-search-pl', 'leadgen-search-pl', 'none']).optional().describe('Preset filling defaults: match types (exact+phrase), bidding, geo PL (2616), language PL (1045). Omit/"none" for manual MANUAL_CPC with no targeting defaults.'),
+      preset: z.enum(['ecommerce-search', 'leadgen-search', 'none']).optional().describe('Preset filling match types (exact+phrase) and bidding. Presets never set a country or language — pass locations and languages explicitly. Omit/"none" for manual MANUAL_CPC.'),
       campaign_name: z.string().min(1).describe('New campaign name'),
       daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
       final_url: z.string().url().describe('Default final URL for ads and sitelinks'),
@@ -278,8 +278,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('RSA headlines: 3-15, max 30 chars each'),
         descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('RSA descriptions: 2-4, max 90 chars each'),
       })).min(1).max(20).describe('Ad groups; each gets its keywords and one responsive search ad'),
-      location_criterion_ids: z.array(z.string().regex(/^\d+$/, 'Geo target constant IDs must be numeric')).optional().describe('Geo target constant IDs; defaults from preset (PL=2616)'),
-      language_criterion_ids: z.array(z.string().regex(/^\d+$/, 'Language constant IDs must be numeric')).optional().describe('Language constant IDs; defaults from preset (Polish=1045)'),
+      locations: z.array(z.string().min(1)).min(1).describe('Required. Countries the campaign targets, as ISO country codes such as ["PL"] or ["CZ","SK"]. A numeric geo target constant ID is also accepted for a region or city. There is no default — ask the user.'),
+      languages: z.array(z.string().min(1)).min(1).describe('Required. Languages the campaign targets, as ISO language codes such as ["pl"] or ["cs","en"]. A numeric language constant ID is also accepted. There is no default — ask the user.'),
       positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('Default PRESENCE (recommended for local intent)'),
       bidding: z.object({
         type: z.enum(['MANUAL_CPC', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'TARGET_CPA', 'TARGET_ROAS']),
@@ -310,6 +310,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       const limits = await loadAmountLimits(cfg, normalizedCustomerId);
       const limitError = amountFieldLimitError(args, limits);
       if (limitError) return validationResult(limitError);
+      const targeting = await resolveTargeting(cfg, normalizedCustomerId, args.locations, args.languages);
+      if (targeting.error) return validationResult(targeting.error);
       const dailyBudgetMicros = amountToMicros(args.daily_budget_amount);
 
       const payload = buildSearchCampaignPayload({
@@ -325,8 +327,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
           headlines: ag.headlines,
           descriptions: ag.descriptions,
         })),
-        locationCriterionIds: args.location_criterion_ids,
-        languageCriterionIds: args.language_criterion_ids,
+        locationCriterionIds: targeting.locations.map((entry) => entry.id),
+        languageCriterionIds: targeting.languages.map((entry) => entry.id),
         positiveGeoTargetType: args.positive_geo_target_type,
         bidding: args.bidding ? {
           type: args.bidding.type,
@@ -339,7 +341,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         call: args.call ? { countryCode: args.call.country_code, phoneNumber: args.call.phone_number } : undefined,
       });
 
-      const preview = formatSearchCampaignPreview(normalizedCustomerId, payload, limits.currency);
+      const preview = formatSearchCampaignPreview(normalizedCustomerId, payload, limits.currency, targeting);
       const mutation = createToken('search_campaign_full_create', {
         customer_id: normalizedCustomerId,
         payload,
@@ -350,7 +352,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_display_campaign_full',
-    'Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting (defaults PL) + ad group + one responsive display ad (using existing uploaded image asset IDs). Returns a SINGLE preview and ONE confirmation token. Prefer this over separate prepare_display_campaign + prepare_display_ad_group + prepare_responsive_display_ad calls.',
+    'Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad group + one responsive display ad (using existing uploaded image asset IDs). Returns a SINGLE preview and ONE confirmation token. Prefer this over separate prepare_display_campaign + prepare_display_ad_group + prepare_responsive_display_ad calls.',
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       campaign_name: z.string().min(1).describe('New campaign name'),
@@ -360,8 +362,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         target_cpa_amount: z.number().positive().optional(),
         target_roas: z.number().positive().max(50).optional().describe('Multiplier, e.g. 4.0 = 400%'),
       }).optional().describe('Defaults to MANUAL_CPC'),
-      location_criterion_ids: z.array(z.string().regex(/^\d+$/)).optional().describe('Defaults to PL (2616)'),
-      language_criterion_ids: z.array(z.string().regex(/^\d+$/)).optional().describe('Defaults to Polish (1045)'),
+      locations: z.array(z.string().min(1)).min(1).describe('Required. Countries as ISO codes such as ["PL"] or ["CZ","SK"], or numeric geo target constant IDs. There is no default — ask the user.'),
+      languages: z.array(z.string().min(1)).min(1).describe('Required. Languages as ISO codes such as ["pl"] or ["cs","en"], or numeric language constant IDs. There is no default — ask the user.'),
       positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional(),
       ad_group: z.object({
         name: z.string().min(1),
@@ -387,6 +389,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       const limits = await loadAmountLimits(cfg, normalizedCustomerId);
       const limitError = amountFieldLimitError(args, limits);
       if (limitError) return validationResult(limitError);
+      const targeting = await resolveTargeting(cfg, normalizedCustomerId, args.locations, args.languages);
+      if (targeting.error) return validationResult(targeting.error);
       const dailyBudgetMicros = amountToMicros(args.daily_budget_amount);
 
       const payload = buildDisplayCampaignPayload({
@@ -397,8 +401,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
           targetCpaMicros: args.bidding.target_cpa_amount ? Math.round(args.bidding.target_cpa_amount * 1_000_000) : undefined,
           targetRoas: args.bidding.target_roas,
         } : undefined,
-        locationCriterionIds: args.location_criterion_ids,
-        languageCriterionIds: args.language_criterion_ids,
+        locationCriterionIds: targeting.locations.map((entry) => entry.id),
+        languageCriterionIds: targeting.languages.map((entry) => entry.id),
         positiveGeoTargetType: args.positive_geo_target_type,
         adGroup: {
           name: args.ad_group.name,
@@ -417,7 +421,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         },
       });
 
-      const preview = formatDisplayCampaignPreview(normalizedCustomerId, payload, limits.currency);
+      const preview = formatDisplayCampaignPreview(normalizedCustomerId, payload, limits.currency, targeting);
       const mutation = createToken('display_campaign_full_create', {
         customer_id: normalizedCustomerId,
         payload,
@@ -740,27 +744,29 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_id: z.string().describe('Existing campaign ID'),
-      location_criterion_ids: criterionIdListSchema.default([]).describe('Geo target constant criterion IDs, e.g. 2616 for Poland'),
-      language_criterion_ids: criterionIdListSchema.default([]).describe('Language constant criterion IDs, e.g. 1045 for Polish, 1000 for English'),
+      locations: z.array(z.string().min(1)).default([]).describe('Countries as ISO codes such as ["PL"] or ["CZ","SK"], or numeric geo target constant IDs for regions and cities'),
+      languages: z.array(z.string().min(1)).default([]).describe('Languages as ISO codes such as ["pl"] or ["cs","en"], or numeric language constant IDs'),
       safe_word: safeWordSchema,
     },
-    async ({ customer_id, campaign_id, location_criterion_ids, language_criterion_ids, safe_word }) => {
+    async ({ customer_id, campaign_id, locations, languages, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      if (location_criterion_ids.length + language_criterion_ids.length < 1) {
-        return validationResult('Provide at least one location_criterion_id or language_criterion_id.');
+      if (locations.length + languages.length < 1) {
+        return validationResult('Provide at least one location or language.');
       }
-      if (location_criterion_ids.length + language_criterion_ids.length > MAX_TARGETING_CRITERIA_PER_MUTATION) {
+      if (locations.length + languages.length > MAX_TARGETING_CRITERIA_PER_MUTATION) {
         return validationResult(`Too many targeting criteria. Max ${MAX_TARGETING_CRITERIA_PER_MUTATION}.`);
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
-      const uniqueLocations = [...new Set(location_criterion_ids.map(normalizeResourceId))];
-      const uniqueLanguages = [...new Set(language_criterion_ids.map(normalizeResourceId))];
+      const targeting = await resolveTargeting(cfg, normalizedCustomerId, locations, languages);
+      if (targeting.error) return validationResult(targeting.error);
+      const uniqueLocations = targeting.locations.map((entry) => entry.id);
+      const uniqueLanguages = targeting.languages.map((entry) => entry.id);
       const preview = [
         `Add campaign targeting to campaign ${normalizedCampaignId}, account ${normalizedCustomerId}`,
-        `Location criterion IDs: ${uniqueLocations.length ? uniqueLocations.join(', ') : '(none)'}`,
-        `Language criterion IDs: ${uniqueLanguages.length ? uniqueLanguages.join(', ') : '(none)'}`,
+        `Locations: ${targeting.locations.length ? targeting.locations.map((entry) => entry.label).join(', ') : '(none)'}`,
+        `Languages: ${targeting.languages.length ? targeting.languages.map((entry) => entry.label).join(', ') : '(none)'}`,
       ].join('\n');
       const mutation = createToken('campaign_targeting_create', {
         customer_id: normalizedCustomerId,

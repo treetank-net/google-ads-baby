@@ -1,6 +1,31 @@
 # Changelog
 
-## v0.20.2
+## v0.21.0
+
+The plugin shipped with Poland baked into it. Two constants, `GEO_POLAND = '2616'` and
+`LANG_POLISH = '1045'`, decided the country and language of every campaign built from a preset —
+on a tool distributed to whoever installs it. One of the two was also simply wrong: `1045` is
+**Afar**, not Polish. Polish is `1030`.
+
+That mistake is the only reason it was ever caught. Afar is not targetable, so the API rejected the
+whole composite with `CriterionError.CANNOT_TARGET_LANGUAGE` — after the user had already read a
+preview claiming Polish and spent their confirmation on it. Had the typo landed on a targetable
+language, the plugin would have quietly created campaigns in the wrong one and reported success.
+
+### Breaking
+- **`location_criterion_ids` and `language_criterion_ids` are replaced by `locations` and `languages`** in `prepare_search_campaign_full`, `prepare_display_campaign_full` and `prepare_campaign_targeting`. Both accept either an ISO code (`"PL"`, `"de"`) or a numeric criterion ID, so a region or city ID still works — one field instead of two, to keep the manifest from growing. They are **required** in the composite builders: a campaign with no stated market is a validation error, not a silent default.
+- **Presets no longer carry a country or a language, and lost their `-pl` suffix**: `ecommerce-search-pl` → `ecommerce-search`, `leadgen-search-pl` → `leadgen-search`. A preset now sets match types and bidding — things that are true anywhere — and nothing geographic. No aliases, same reasoning as the `*_pln` → `*_amount` rename in 0.20.0.
+
+### Added
+- **`tools/targeting.ts` resolves ISO codes against the API** and caches the result for the life of the process. Languages are fetched once; geo targets are fetched per unseen code. The resolver checks `language_constant.targetable` and refuses a language Google will not accept, naming it: *"Language Afar (aa) is not targetable in Google Ads, so the campaign would be rejected."* That check now runs **before** the confirmation token is minted, so a bad market costs a retry, not a burned confirmation.
+- **Previews name the targets instead of printing IDs.** `Geo targets: Poland (PL) — PRESENCE` and `Languages: Polish (pl)`, where the old preview showed `2616` and `1045` and no reader could have told they disagreed.
+- **A `gaql` skill ships with the plugin** (`skills/gaql/SKILL.md`), covering the parts of GAQL that are not SQL — no `OR`, no parentheses, no `JOIN`, no `GROUP BY`, no aggregate functions — plus how enums and micros come back, how segments multiply rows, and a set of ready queries. Written from the errors this release produced.
+- **Server instructions tell the model to ask which markets a campaign targets** and never to assume one.
+
+### Fixed
+- **Geo lookups no longer build a query GAQL cannot parse.** The first version filtered country codes and criterion IDs in one `WHERE` joined by `OR`; GAQL has neither `OR` nor grouping parentheses, so it passed the unit tests and failed on the first live call. Codes and IDs are now two separate queries, and a smoke test asserts no generated query contains ` OR `.
+- **A failed targeting lookup reported `[object Object]`.** The resolver was interpolating the raw error instead of passing it through `formatError()`.
+
 
 `prepare_budget_change` was showing the user a "before" amount it had never verified.
 
