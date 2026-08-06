@@ -2,11 +2,32 @@ import { configFromEnv, saveConfig, loadSavedConfig, getConfigPath } from '../sr
 import { startAuthFlow, checkAuthStatus } from '../src/auth.js';
 import { OAUTH_CLIENT_ID } from '../src/constants.js';
 import { unlink } from 'fs/promises';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerWriteTools } from '../src/tools/write.js';
+import { updatedFieldNames } from '../src/history.js';
+import {
+  MAX_BUDGET_MICROS,
+  MAX_CPC_MICROS,
+  MAX_TARGET_CPA_MICROS,
+} from '../src/tools/write-schemas.js';
+import {
+  PLN_FIELD_LIMITS,
+  plnFieldLimitError,
+  budgetLimitError,
+  cpcLimitError,
+  targetCpaLimitError,
+  changeLine,
+  microsChangeLine,
+  manualBiddingRequiredWarning,
+  sharedBudgetWarning,
+  validateResponsiveDisplayText,
+} from '../src/tools/write-helpers.js';
 import {
   analyzeAccountHygiene,
   analyzeScalingCandidates,
   analyzeSearchTermsWaste,
   analyzePmaxBreakdown,
+  analyzeDisplayRemarketing,
   windowClause,
   MICROS,
 } from '../src/tools/analysis-helpers.js';
@@ -149,6 +170,196 @@ function testAnalysis() {
   assert('windowClause: spans 89 days between endpoints (90 inclusive)', spanDays === 89);
 }
 
+// Fields that carry an amount for preview only and never reach a mutation,
+// so a safety cap on them would be meaningless.
+const CAP_SWEEP_EXEMPT = new Set(['prepare_budget_change.current_budget_pln']);
+
+function registeredWriteTools(): Record<string, any> {
+  const server = new McpServer({ name: 'smoke', version: '0.0.0' });
+  registerWriteTools(server, {
+    clientId: '',
+    clientSecret: '',
+    developerToken: '',
+    refreshToken: '',
+    loginCustomerId: '',
+    safetyLevel: 'standard',
+  } as any);
+  return (server as any)._registeredTools as Record<string, any>;
+}
+
+function toolFieldNames(tool: any): string[] {
+  return Object.keys(tool?.inputSchema?.shape ?? {});
+}
+
+function resultText(result: any): string {
+  return String(result?.content?.[0]?.text ?? '');
+}
+
+function testLimitHelpers() {
+  console.log('\n--- Mutation limit helpers ---');
+
+  assert('budget at the cap is allowed', budgetLimitError(MAX_BUDGET_MICROS / 1_000_000) === null);
+  assert('budget above the cap is rejected', (budgetLimitError(MAX_BUDGET_MICROS / 1_000_000 + 1) ?? '').includes('safety limit'));
+  assert('CPC at the cap is allowed', cpcLimitError(MAX_CPC_MICROS / 1_000_000) === null);
+  assert('CPC above the cap is rejected', (cpcLimitError(MAX_CPC_MICROS / 1_000_000 + 0.01) ?? '').includes('safety limit'));
+  assert('target CPA at the cap is allowed', targetCpaLimitError(MAX_TARGET_CPA_MICROS / 1_000_000) === null);
+  assert('target CPA above the cap is rejected', (targetCpaLimitError(MAX_TARGET_CPA_MICROS / 1_000_000 + 1) ?? '').includes('safety limit'));
+
+  // Nested payloads (the *_full tools) must be walked, not just top-level fields.
+  const nested = { customer_id: '1', daily_budget_pln: 100, ad_groups: [{ name: 'a', cpc_bid_pln: 2 }, { name: 'b', cpc_bid_pln: 9999 }] };
+  const nestedError = plnFieldLimitError(nested) ?? '';
+  assert('nested cpc_bid_pln over the cap is caught', nestedError.includes('safety limit'));
+  assert('nested error names the offending path', nestedError.includes('ad_groups[1].cpc_bid_pln'));
+  assert('clean nested payload passes', plnFieldLimitError({ daily_budget_pln: 10, ad_groups: [{ cpc_bid_pln: 3 }] }) === null);
+  assert('deeply nested bidding target is caught', (plnFieldLimitError({ bidding: { target_cpa_pln: 100000 } }) ?? '').includes('Target CPA'));
+
+  assert('before -> after keeps both values', changeLine('Status', 'PAUSED', 'ENABLED') === 'Status: PAUSED → ENABLED');
+  assert('missing previous value is explicit', changeLine('Name', undefined, 'x').includes('(not set)'));
+  assert('12x bid increase is called out', microsChangeLine('Max CPC', 200_000, 2_500_000).includes('12.5x more'));
+  assert('halving is called out as less', microsChangeLine('Max CPC', 2_000_000, 500_000).includes('4.0x less'));
+  assert('small change shows percent', microsChangeLine('Daily budget', 100_000_000, 110_000_000).includes('+10%'));
+  assert('unknown previous amount degrades gracefully', microsChangeLine('Max CPC', undefined, 1_000_000).includes('(not set)'));
+
+  assert('manual CPC needs no bidding warning', manualBiddingRequiredWarning('MANUAL_CPC') === null);
+  assert('automated bidding warns that CPC is ignored', (manualBiddingRequiredWarning('MAXIMIZE_CONVERSIONS') ?? '').includes('will not affect delivery'));
+  assert('unshared budget needs no warning', sharedBudgetWarning(1, false) === null);
+  assert('shared budget warns about other campaigns', (sharedBudgetWarning(3, true) ?? '').includes('3 campaign(s)'));
+
+  assert('display ad text limits enforced', (validateResponsiveDisplayText(['a', 'b', 'c', 'd', 'e', 'f'], ['d']) ?? '').includes('1-5 headlines'));
+  assert('valid display ad text passes', validateResponsiveDisplayText(['a'], ['d']) === null);
+
+  assert('identifier keys are not reported as changed fields', !updatedFieldNames({ customer_id: '1', ad_group_id: '2', status: 'PAUSED' }).includes('ad_group_id'));
+  assert('changed fields are reported', updatedFieldNames({ customer_id: '1', cpc_bid_micros: 5, status: 'PAUSED' }).sort().join(',') === 'cpc_bid_micros,status');
+}
+
+function testToolContract() {
+  console.log('\n--- Tool contract ---');
+
+  const tools = registeredWriteTools();
+  assert('prepare_ad_group_update is registered', 'prepare_ad_group_update' in tools);
+  assert('prepare_campaign_update is registered', 'prepare_campaign_update' in tools);
+  assert('prepare_ad_update is registered', 'prepare_ad_update' in tools);
+  assert('prepare_ad_group_settings is gone', !('prepare_ad_group_settings' in tools));
+
+  // Every field a create tool sets must have an update path, or the plugin can
+  // create state it cannot fix (the gap this release closes).
+  const adGroupUpdateFields = toolFieldNames(tools['prepare_ad_group_update']);
+  for (const [createField, updateField] of [['cpc_bid_pln', 'cpc_bid_pln'], ['ad_group_name', 'name'], ['optimized_targeting_enabled', 'optimized_targeting_enabled']]) {
+    assert(`ad group create field ${createField} has an update path`, adGroupUpdateFields.includes(updateField));
+  }
+  const campaignUpdateFields = toolFieldNames(tools['prepare_campaign_update']);
+  for (const [createField, updateField] of [['campaign_name', 'name'], ['daily_budget_pln', 'daily_budget_pln'], ['status', 'status']]) {
+    assert(`campaign create field ${createField} has an update path`, campaignUpdateFields.includes(updateField));
+  }
+
+  // Any *_pln field must match a known limit rule; a field that only hits the
+  // fallback is a cap waiting to be forgotten.
+  const unmatched: string[] = [];
+  for (const [toolName, tool] of Object.entries(tools)) {
+    for (const field of toolFieldNames(tool)) {
+      if (!field.endsWith('_pln')) continue;
+      if (!PLN_FIELD_LIMITS.some((rule) => rule.match.test(field))) unmatched.push(`${toolName}.${field}`);
+    }
+  }
+  assert('every *_pln field maps to a limit rule', unmatched.length === 0, unmatched.join(', '));
+}
+
+async function testCapEnforcement() {
+  console.log('\n--- Cap enforcement (every money field, every tool) ---');
+
+  const tools = registeredWriteTools();
+  const skipped: string[] = [];
+  let checked = 0;
+
+  for (const [toolName, tool] of Object.entries(tools)) {
+    for (const field of toolFieldNames(tool)) {
+      if (!field.endsWith('_pln')) continue;
+      const key = `${toolName}.${field}`;
+      if (CAP_SWEEP_EXEMPT.has(key)) {
+        skipped.push(key);
+        continue;
+      }
+      const args: Record<string, unknown> = { customer_id: '1234567890', safe_word: 'smoke', [field]: 10_000_000 };
+      if (toolFieldNames(tool).includes('campaign_id')) args['campaign_id'] = '1';
+      if (toolFieldNames(tool).includes('ad_group_id')) args['ad_group_id'] = '1';
+      if (toolFieldNames(tool).includes('budget_id')) args['budget_id'] = '1';
+      if (field === 'target_cpa_pln') args['strategy_type'] = 'TARGET_CPA';
+      let text = '';
+      try {
+        text = resultText(await tool.handler(args, {}));
+      } catch (err: any) {
+        text = `threw: ${err?.message ?? err}`;
+      }
+      checked += 1;
+      assert(`${key} rejects an absurd amount`, text.startsWith('Error:') && text.includes('safety limit'), text.slice(0, 160));
+    }
+  }
+
+  console.log(`  checked ${checked} money field(s); exempt: ${skipped.length ? skipped.join(', ') : 'none'}`);
+}
+
+function testDisplayRemarketing() {
+  console.log('\n--- Display remarketing diagnostics ---');
+
+  const list = (id: number, size: number | undefined, eligible: boolean, life = 30) => ({
+    user_list: { id, name: `list ${id}`, resource_name: `customers/1/userLists/${id}`, size_for_display: size, eligible_for_display: eligible, membership_life_span: life },
+  });
+
+  // Manual CPC campaign, tiny list, floor-level bid: the bid is a valid test here,
+  // but the undersized list is the blocking problem.
+  const manual = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 1, name: 'RMKT SK', status: 'ENABLED', serving_status: 'SERVING', bidding_strategy_type: 'MANUAL_CPC' }, campaign_budget: { amount_micros: m(20) }, metrics: { impressions: 0 } }],
+    adGroups: [{ campaign: { id: 1 }, ad_group: { id: 11, name: 'AG', status: 'ENABLED', cpc_bid_micros: 50_000 } }],
+    audiences: [{ campaign: { id: 1 }, ad_group: { id: 11 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/9' } } }],
+    userLists: [list(9, 40, true)],
+  }, 30);
+  const manualCodes = manual.findings.map((f) => f.code);
+  assert('display: undersized list flagged critical', manual.findings.some((f) => f.code === 'audience_below_display_minimum' && f.severity === 'critical'));
+  assert('display: zero impressions flagged', manualCodes.includes('zero_impressions'));
+  assert('display: floor-level manual CPC flagged', manualCodes.includes('manual_cpc_below_floor'));
+  assert('display: bid finding points at prepare_ad_group_update', manual.findings.find((f) => f.code === 'manual_cpc_below_floor')?.prepare_actions.includes('prepare_ad_group_update') === true);
+  assert('display: no bogus bids-not-the-constraint note on manual CPC', !manualCodes.includes('bids_not_the_constraint'));
+  assert('display: audience coverage reported', manual.audience_coverage.length === 1);
+
+  // Automated bidding: raising CPC cannot fix delivery, and the report must say so.
+  const automated = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 2, name: 'RMKT HU', status: 'ENABLED', serving_status: 'SERVING', bidding_strategy_type: 'MAXIMIZE_CONVERSIONS' }, campaign_budget: { amount_micros: m(20) }, metrics: { impressions: 0 } }],
+    adGroups: [{ campaign: { id: 2 }, ad_group: { id: 21, name: 'AG', status: 'ENABLED', cpc_bid_micros: 50_000 } }],
+    audiences: [{ campaign: { id: 2 }, ad_group: { id: 21 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/8' } } }],
+    userLists: [list(8, 5000, true)],
+  }, 30);
+  const automatedCodes = automated.findings.map((f) => f.code);
+  assert('display: automated bidding gets an explicit bids-are-ignored note', automatedCodes.includes('bids_not_the_constraint'));
+  assert('display: low bid not flagged under automated bidding', !automatedCodes.includes('manual_cpc_below_floor'));
+  assert('display: healthy list not flagged', !automatedCodes.includes('audience_below_display_minimum'));
+
+  // Structural blockers: no audience at all, and a non-serving campaign.
+  const structural = analyzeDisplayRemarketing({
+    campaigns: [
+      { campaign: { id: 3, name: 'No audience', status: 'ENABLED', serving_status: 'SERVING', bidding_strategy_type: 'MANUAL_CPC' }, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } },
+      { campaign: { id: 4, name: 'Suspended', status: 'ENABLED', serving_status: 'SUSPENDED', bidding_strategy_type: 'MANUAL_CPC' }, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } },
+    ],
+    adGroups: [{ campaign: { id: 4 }, ad_group: { id: 41, name: 'AG', status: 'PAUSED', cpc_bid_micros: m(1) } }],
+    audiences: [{ campaign: { id: 4 }, ad_group: { id: 41 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/7' } } }],
+    userLists: [list(7, 5000, false)],
+  }, 30);
+  const structuralCodes = structural.findings.map((f) => f.code);
+  assert('display: campaign without any user list flagged', structuralCodes.includes('no_audience_attached'));
+  assert('display: non-serving campaign flagged', structuralCodes.includes('campaign_not_serving'));
+  assert('display: list not eligible for Display flagged', structuralCodes.includes('audience_not_eligible_for_display'));
+  assert('display: paused ad group in enabled campaign flagged', structuralCodes.includes('ad_group_paused_in_enabled_campaign'));
+  assert('display: critical findings sort first', structural.findings[0]?.severity === 'critical');
+
+  // Nothing wrong: a serving campaign with a healthy list produces no findings.
+  const healthy = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 5, name: 'Healthy', status: 'ENABLED', serving_status: 'SERVING', bidding_strategy_type: 'MANUAL_CPC' }, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 12000 } }],
+    adGroups: [{ campaign: { id: 5 }, ad_group: { id: 51, name: 'AG', status: 'ENABLED', cpc_bid_micros: m(1.2) } }],
+    audiences: [{ campaign: { id: 5 }, ad_group: { id: 51 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/6' } } }],
+    userLists: [list(6, 25000, true)],
+  }, 30);
+  assert('display: healthy setup yields no findings', healthy.findings.length === 0, healthy.findings.map((f) => f.code).join(','));
+}
+
 async function main() {
   console.log('Smoke test: google-ads-baby MCP server\n');
 
@@ -158,6 +369,10 @@ async function main() {
   await testSaveLoadConfig();
   await testAuthFlow();
   testAnalysis();
+  testDisplayRemarketing();
+  testLimitHelpers();
+  testToolContract();
+  await testCapEnforcement();
 
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);
   process.exit(failed > 0 ? 1 : 0);

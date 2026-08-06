@@ -413,3 +413,278 @@ export function analyzePmaxBreakdown(
   }
   return { findings: sortFindings(findings), breakdown };
 }
+
+// ---- Display remarketing delivery diagnostics ----
+
+export const DISPLAY_REMARKETING_DEFAULTS = {
+  minDisplayListSize: 100, // Display needs roughly this many active users before it serves
+  lowCpcUnits: 0.1, // manual CPC at or below this is a plausible delivery blocker
+  minDailyBudgetUnits: 5, // ignore trivially small budgets when flagging zero impressions
+  shortMembershipDays: 7, // very short membership windows shrink a remarketing list fast
+};
+
+const SERVING_STATUSES_OK = new Set(['SERVING', 'ELIGIBLE']);
+
+export interface DisplayCampaignRow {
+  campaign?: { id?: string | number; name?: string; status?: string; serving_status?: string; bidding_strategy_type?: string };
+  campaign_budget?: { amount_micros?: string | number };
+  metrics?: { impressions?: number | string; cost_micros?: number | string };
+}
+
+export interface DisplayAdGroupRow {
+  campaign?: { id?: string | number; name?: string; status?: string };
+  ad_group?: { id?: string | number; name?: string; status?: string; cpc_bid_micros?: number | string };
+}
+
+export interface DisplayAudienceRow {
+  campaign?: { id?: string | number };
+  ad_group?: { id?: string | number; name?: string };
+  ad_group_criterion?: { user_list?: { user_list?: string }; status?: string };
+}
+
+export interface UserListRow {
+  user_list?: {
+    id?: string | number;
+    name?: string;
+    resource_name?: string;
+    size_for_display?: number | string;
+    eligible_for_display?: boolean;
+    membership_life_span?: number | string;
+  };
+}
+
+export function buildDisplayCampaignQuery(clause: string): string {
+  return `
+    SELECT
+      campaign.id, campaign.name, campaign.status, campaign.serving_status,
+      campaign.bidding_strategy_type,
+      campaign_budget.amount_micros,
+      metrics.impressions, metrics.cost_micros
+    FROM campaign
+    WHERE ${clause}
+      AND campaign.advertising_channel_type = 'DISPLAY'
+  `;
+}
+
+export function buildDisplayAdGroupQuery(): string {
+  return `
+    SELECT
+      campaign.id, campaign.name, campaign.status,
+      ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros
+    FROM ad_group
+    WHERE campaign.advertising_channel_type = 'DISPLAY'
+      AND ad_group.status != 'REMOVED'
+  `;
+}
+
+export function buildDisplayAudienceQuery(): string {
+  return `
+    SELECT
+      campaign.id,
+      ad_group.id, ad_group.name,
+      ad_group_criterion.status,
+      ad_group_criterion.user_list.user_list
+    FROM ad_group_criterion
+    WHERE campaign.advertising_channel_type = 'DISPLAY'
+      AND ad_group_criterion.type = 'USER_LIST'
+      AND ad_group_criterion.status != 'REMOVED'
+  `;
+}
+
+export function buildUserListQuery(): string {
+  return `
+    SELECT
+      user_list.id, user_list.name, user_list.resource_name,
+      user_list.size_for_display, user_list.eligible_for_display,
+      user_list.membership_life_span
+    FROM user_list
+  `;
+}
+
+function displayTask(title: string, reason: string, context: string): SuggestedTask {
+  return {
+    title,
+    intent: 'google_ads_display_remarketing_diagnostics',
+    suggested_workflow: 'google-ads/display-youtube-demandgen-remarketing.md',
+    source_type: 'review',
+    reason,
+    context,
+  };
+}
+
+export function analyzeDisplayRemarketing(
+  input: {
+    campaigns: DisplayCampaignRow[];
+    adGroups: DisplayAdGroupRow[];
+    audiences: DisplayAudienceRow[];
+    userLists: UserListRow[];
+  },
+  windowDays: number,
+  t = DISPLAY_REMARKETING_DEFAULTS,
+): { findings: Finding[]; audience_coverage: Array<Record<string, unknown>> } {
+  const findings: Finding[] = [];
+  const listsByResourceName = new Map<string, UserListRow['user_list']>();
+  for (const row of input.userLists) {
+    const resourceName = row.user_list?.resource_name;
+    if (resourceName) listsByResourceName.set(String(resourceName), row.user_list);
+  }
+
+  const audiencesByCampaign = new Map<string, DisplayAudienceRow[]>();
+  for (const row of input.audiences) {
+    const campaignId = String(row.campaign?.id ?? '');
+    if (!campaignId) continue;
+    const bucket = audiencesByCampaign.get(campaignId) ?? [];
+    bucket.push(row);
+    audiencesByCampaign.set(campaignId, bucket);
+  }
+
+  const audience_coverage: Array<Record<string, unknown>> = [];
+
+  for (const row of input.campaigns) {
+    const campaignId = String(row.campaign?.id ?? '');
+    const name = row.campaign?.name ?? (campaignId || 'unknown');
+    const entity = `campaign ${name}`;
+    const status = String(row.campaign?.status ?? '');
+    const servingStatus = String(row.campaign?.serving_status ?? '');
+    const strategy = String(row.campaign?.bidding_strategy_type ?? '');
+    const impressions = Number(row.metrics?.impressions ?? 0);
+    const dailyBudget = toUnits(row.campaign_budget?.amount_micros);
+    const campaignAudiences = audiencesByCampaign.get(campaignId) ?? [];
+
+    if (status === 'ENABLED' && servingStatus && !SERVING_STATUSES_OK.has(servingStatus)) {
+      findings.push({
+        code: 'campaign_not_serving',
+        severity: 'critical',
+        entity,
+        observation: `Campaign is ENABLED but serving_status is ${servingStatus} — delivery is blocked upstream of bids and audiences.`,
+        metrics: { serving_status: servingStatus, impressions, daily_budget: dailyBudget },
+        suggested_task: displayTask(`Fix serving status on ${name}`, 'Enabled Display campaign is not eligible to serve.', `campaign_id=${campaignId}; serving_status=${servingStatus}`),
+        prepare_actions: [],
+      });
+    }
+
+    if (status === 'ENABLED' && !campaignAudiences.length) {
+      findings.push({
+        code: 'no_audience_attached',
+        severity: 'critical',
+        entity,
+        observation: 'Enabled Display campaign has no user-list criteria on any ad group — a remarketing campaign without an audience cannot serve to past visitors.',
+        metrics: { impressions, daily_budget: dailyBudget },
+        suggested_task: displayTask(`Attach a remarketing audience to ${name}`, 'Display remarketing campaign has no user list attached.', `campaign_id=${campaignId}`),
+        prepare_actions: [],
+      });
+    }
+
+    if (status === 'ENABLED' && dailyBudget >= t.minDailyBudgetUnits && impressions === 0) {
+      findings.push({
+        code: 'zero_impressions',
+        severity: 'critical',
+        entity,
+        observation: `Enabled campaign with ${dailyBudget} daily budget served 0 impressions over ${windowDays}d — check audience size, serving status and ad approval before touching bids.`,
+        metrics: { impressions, daily_budget: dailyBudget, window_days: windowDays },
+        suggested_task: displayTask(`Diagnose zero-impression Display campaign: ${name}`, 'Enabled Display campaign with a budget is not serving at all.', `campaign_id=${campaignId}; daily_budget=${dailyBudget}; window_days=${windowDays}`),
+        prepare_actions: [],
+      });
+    }
+
+    const seenLists = new Set<string>();
+    for (const audienceRow of campaignAudiences) {
+      const resourceName = audienceRow.ad_group_criterion?.user_list?.user_list;
+      if (!resourceName || seenLists.has(String(resourceName))) continue;
+      seenLists.add(String(resourceName));
+      const list = listsByResourceName.get(String(resourceName));
+      const listName = list?.name ?? String(resourceName);
+      const size = list?.size_for_display === undefined ? undefined : Number(list.size_for_display);
+      const membershipDays = list?.membership_life_span === undefined ? undefined : Number(list.membership_life_span);
+      audience_coverage.push({
+        campaign: name,
+        user_list: listName,
+        size_for_display: size ?? 'unknown',
+        eligible_for_display: list?.eligible_for_display ?? 'unknown',
+        membership_life_span_days: membershipDays ?? 'unknown',
+      });
+
+      if (size !== undefined && size < t.minDisplayListSize) {
+        findings.push({
+          code: 'audience_below_display_minimum',
+          severity: 'critical',
+          entity: `user list ${listName} (${name})`,
+          observation: `List has ${size} users for Display, below the ~${t.minDisplayListSize} needed to serve — this blocks delivery regardless of bid or budget.`,
+          metrics: { size_for_display: size, minimum: t.minDisplayListSize, campaign_id: campaignId },
+          suggested_task: displayTask(`Grow or replace remarketing list: ${listName}`, 'Remarketing list is below the Display minimum size.', `campaign_id=${campaignId}; user_list=${listName}; size=${size}`),
+          prepare_actions: [],
+        });
+      }
+
+      if (list?.eligible_for_display === false) {
+        findings.push({
+          code: 'audience_not_eligible_for_display',
+          severity: 'critical',
+          entity: `user list ${listName} (${name})`,
+          observation: 'List is not eligible for Display — check the tag/source and membership rules; Display cannot serve to it.',
+          metrics: { campaign_id: campaignId },
+          suggested_task: displayTask(`Restore Display eligibility for list: ${listName}`, 'Remarketing list is not eligible for the Display network.', `campaign_id=${campaignId}; user_list=${listName}`),
+          prepare_actions: [],
+        });
+      }
+
+      if (membershipDays !== undefined && membershipDays > 0 && membershipDays < t.shortMembershipDays && size !== undefined && size < t.minDisplayListSize * 10) {
+        findings.push({
+          code: 'short_membership_window',
+          severity: 'warning',
+          entity: `user list ${listName} (${name})`,
+          observation: `Membership lasts ${membershipDays}d on a list of ${size} users — the audience drains faster than it refills.`,
+          metrics: { membership_life_span_days: membershipDays, size_for_display: size },
+          suggested_task: displayTask(`Review membership window on list: ${listName}`, 'Short membership duration keeps the remarketing list too small to serve.', `campaign_id=${campaignId}; user_list=${listName}; membership_days=${membershipDays}`),
+          prepare_actions: [],
+        });
+      }
+    }
+
+    const campaignAdGroups = input.adGroups.filter((adGroup) => String(adGroup.campaign?.id ?? '') === campaignId);
+    for (const adGroup of campaignAdGroups) {
+      const adGroupName = adGroup.ad_group?.name ?? String(adGroup.ad_group?.id ?? 'unknown');
+      const adGroupEntity = `ad group ${adGroupName} (${name})`;
+      const cpc = toUnits(adGroup.ad_group?.cpc_bid_micros);
+      const adGroupStatus = String(adGroup.ad_group?.status ?? '');
+
+      if (status === 'ENABLED' && adGroupStatus === 'PAUSED') {
+        findings.push({
+          code: 'ad_group_paused_in_enabled_campaign',
+          severity: 'warning',
+          entity: adGroupEntity,
+          observation: 'Ad group is PAUSED inside an ENABLED campaign — nothing in it can serve.',
+          metrics: { campaign_id: campaignId, ad_group_id: String(adGroup.ad_group?.id ?? '') },
+          suggested_task: displayTask(`Decide status of paused ad group: ${adGroupName}`, 'Paused ad group inside an enabled Display campaign.', `campaign_id=${campaignId}; ad_group_id=${adGroup.ad_group?.id}`),
+          prepare_actions: ['prepare_ad_group_update'],
+        });
+      }
+
+      if (strategy === 'MANUAL_CPC' && cpc > 0 && cpc <= t.lowCpcUnits) {
+        findings.push({
+          code: 'manual_cpc_below_floor',
+          severity: 'warning',
+          entity: adGroupEntity,
+          observation: `Manual CPC bid is ${cpc}, at or below ${t.lowCpcUnits} — low enough to lose most Display auctions. Raising it is a valid delivery test here because the campaign uses MANUAL_CPC.`,
+          metrics: { cpc_bid: cpc, floor: t.lowCpcUnits, campaign_id: campaignId, ad_group_id: String(adGroup.ad_group?.id ?? '') },
+          suggested_task: displayTask(`Test a higher CPC on ad group: ${adGroupName}`, 'Manual CPC bid is low enough to suppress Display delivery.', `campaign_id=${campaignId}; ad_group_id=${adGroup.ad_group?.id}; cpc_bid=${cpc}`),
+          prepare_actions: ['prepare_ad_group_update'],
+        });
+      }
+    }
+
+    if (strategy && strategy !== 'MANUAL_CPC' && impressions === 0 && status === 'ENABLED') {
+      findings.push({
+        code: 'bids_not_the_constraint',
+        severity: 'info',
+        entity,
+        observation: `Campaign uses ${strategy}, so ad group CPC bids are ignored by Google. Do not change bids to fix this delivery problem — look at audience size, serving status, ad approval and conversion signal instead.`,
+        metrics: { bidding_strategy_type: strategy, impressions, campaign_id: campaignId },
+        suggested_task: displayTask(`Diagnose non-bid delivery blocker on ${name}`, 'Automated bidding means CPC changes cannot fix zero delivery.', `campaign_id=${campaignId}; bidding_strategy_type=${strategy}`),
+        prepare_actions: [],
+      });
+    }
+  }
+
+  return { findings: sortFindings(findings), audience_coverage };
+}

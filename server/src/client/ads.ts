@@ -123,6 +123,43 @@ export async function mutateAdStatus(
   }]);
 }
 
+export interface AdPatch {
+  status?: 'ENABLED' | 'PAUSED';
+  finalUrl?: string;
+  headlines?: string[];
+  descriptions?: string[];
+  creativeKind?: 'responsive_search_ad' | 'responsive_display_ad';
+}
+
+export async function updateAd(
+  cfg: AdsConfig,
+  customerId: string,
+  adGroupId: string,
+  adId: string,
+  patch: AdPatch,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const results: unknown[] = [];
+  if (patch.status !== undefined) {
+    results.push(await customer.adGroupAds.update([{
+      resource_name: `customers/${customerId}/adGroupAds/${adGroupId}~${adId}`,
+      status: enums.AdGroupAdStatus[patch.status],
+    }]));
+  }
+  const creative: Record<string, any> = {};
+  if (patch.headlines) creative.headlines = patch.headlines.map((text) => ({ text }));
+  if (patch.descriptions) creative.descriptions = patch.descriptions.map((text) => ({ text }));
+  const adResource: Record<string, any> = {
+    resource_name: `customers/${customerId}/ads/${adId}`,
+  };
+  if (patch.finalUrl !== undefined) adResource.final_urls = [patch.finalUrl];
+  if (Object.keys(creative).length && patch.creativeKind) adResource[patch.creativeKind] = creative;
+  if (Object.keys(adResource).length > 1) {
+    results.push(await customer.ads.update([adResource as any]));
+  }
+  return results.length === 1 ? results[0] : results;
+}
+
 export async function createNegativeKeywords(
   cfg: AdsConfig,
   customerId: string,

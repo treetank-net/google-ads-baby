@@ -2,10 +2,100 @@ import type { AdsConfig } from '../config.js';
 import { executeGaql } from '../client.js';
 import { createToken, getTokenTtlSeconds } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
-import { MAX_IMAGE_BYTES, CODEX_HOOK_INSTALL_COMMAND } from './write-schemas.js';
+import {
+  MAX_IMAGE_BYTES,
+  MAX_BUDGET_MICROS,
+  MAX_CPC_MICROS,
+  MAX_TARGET_CPA_MICROS,
+  CODEX_HOOK_INSTALL_COMMAND,
+} from './write-schemas.js';
 
 export function validationResult(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }] };
+}
+
+export function plnToMicros(pln: number): number {
+  return Math.round(pln * 1_000_000);
+}
+
+export function formatPln(micros: number | undefined | null): string {
+  if (micros === undefined || micros === null) return '(not set)';
+  return `${(micros / 1_000_000).toFixed(2)} PLN`;
+}
+
+export function budgetLimitError(pln: number): string | null {
+  return plnToMicros(pln) > MAX_BUDGET_MICROS
+    ? `Budget ${pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`
+    : null;
+}
+
+export function cpcLimitError(pln: number): string | null {
+  return plnToMicros(pln) > MAX_CPC_MICROS
+    ? `CPC bid ${pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`
+    : null;
+}
+
+export function targetCpaLimitError(pln: number): string | null {
+  return plnToMicros(pln) > MAX_TARGET_CPA_MICROS
+    ? `Target CPA ${pln} PLN exceeds the safety limit (${MAX_TARGET_CPA_MICROS / 1_000_000} PLN).`
+    : null;
+}
+
+export const PLN_FIELD_LIMITS: Array<{ match: RegExp; maxMicros: number; label: string }> = [
+  { match: /cpc/, maxMicros: MAX_CPC_MICROS, label: 'CPC bid' },
+  { match: /cpa/, maxMicros: MAX_TARGET_CPA_MICROS, label: 'Target CPA' },
+  { match: /budget/, maxMicros: MAX_BUDGET_MICROS, label: 'Budget' },
+];
+
+export function plnFieldLimitError(value: unknown, path = ''): string | null {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const error = plnFieldLimitError(value[index], `${path}[${index}]`);
+      if (error) return error;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const fieldPath = path ? `${path}.${key}` : key;
+    if (key.endsWith('_pln') && typeof item === 'number') {
+      const rule = PLN_FIELD_LIMITS.find((candidate) => candidate.match.test(key))
+        ?? { maxMicros: MAX_BUDGET_MICROS, label: 'Amount' };
+      if (plnToMicros(item) > rule.maxMicros) {
+        return `${rule.label} ${item} PLN in ${fieldPath} exceeds the safety limit (${rule.maxMicros / 1_000_000} PLN).`;
+      }
+      continue;
+    }
+    const error = plnFieldLimitError(item, fieldPath);
+    if (error) return error;
+  }
+  return null;
+}
+
+export function changeLine(label: string, before: unknown, after: unknown): string {
+  const from = before === undefined || before === null || before === '' ? '(not set)' : String(before);
+  return `${label}: ${from} → ${String(after)}`;
+}
+
+export function microsChangeLine(label: string, beforeMicros: number | undefined, afterMicros: number): string {
+  const base = `${label}: ${formatPln(beforeMicros)} → ${formatPln(afterMicros)}`;
+  if (!beforeMicros || beforeMicros <= 0) return base;
+  const factor = afterMicros / beforeMicros;
+  if (factor >= 1.5) return `${base} (${factor.toFixed(1)}x more)`;
+  if (factor > 0 && factor <= 0.67) return `${base} (${(1 / factor).toFixed(1)}x less)`;
+  const percent = (factor - 1) * 100;
+  return `${base} (${percent >= 0 ? '+' : ''}${percent.toFixed(0)}%)`;
+}
+
+export function manualBiddingRequiredWarning(biddingStrategyType: string | undefined): string | null {
+  if (!biddingStrategyType || biddingStrategyType === 'MANUAL_CPC') return null;
+  return `Warning: campaign bidding strategy is ${biddingStrategyType}. Google ignores ad group CPC bids unless the campaign uses MANUAL_CPC, so this bid change will not affect delivery.`;
+}
+
+export function sharedBudgetWarning(referenceCount: number | undefined, explicitlyShared: boolean | undefined): string | null {
+  if (!explicitlyShared && (referenceCount ?? 1) <= 1) return null;
+  const count = referenceCount ?? 0;
+  return `Warning: this budget is shared by ${count} campaign(s). Changing it affects every campaign using it, not only this one.`;
 }
 
 export function validateCustomer(customerId: string) {
@@ -102,6 +192,12 @@ export function validateResponsiveDisplayInput(input: {
   if (input.marketingImageAssetIds.length < 1 || input.marketingImageAssetIds.length > 15) return 'Responsive display ad clone needs 1-15 marketing image asset IDs.';
   if (input.squareMarketingImageAssetIds.length < 1 || input.squareMarketingImageAssetIds.length > 15) return 'Responsive display ad clone needs 1-15 square marketing image asset IDs.';
   if (input.logoImageAssetIds.length > 5) return 'Responsive display ad clone can use at most 5 logo image asset IDs.';
+  return null;
+}
+
+export function validateResponsiveDisplayText(headlines: string[], descriptions: string[]): string | null {
+  if (headlines.length < 1 || headlines.length > 5 || headlines.some((headline) => headline.length > 30)) return 'Responsive display ad needs 1-5 headlines, max 30 chars each.';
+  if (descriptions.length < 1 || descriptions.length > 5 || descriptions.some((description) => description.length > 90)) return 'Responsive display ad needs 1-5 descriptions, max 90 chars each.';
   return null;
 }
 
@@ -225,6 +321,116 @@ export async function loadImageAssetInfo(cfg: AdsConfig, customerId: string, ass
     };
   }
   return out;
+}
+
+export interface AdGroupState {
+  adGroupId: string;
+  name: string;
+  status: string;
+  cpcBidMicros?: number;
+  type: string;
+  campaignId: string;
+  campaignName: string;
+  biddingStrategyType?: string;
+}
+
+export async function loadAdGroupState(cfg: AdsConfig, customerId: string, adGroupId: string): Promise<AdGroupState | null> {
+  const rows = await executeGaql(cfg, customerId, `
+    SELECT
+      ad_group.id,
+      ad_group.name,
+      ad_group.status,
+      ad_group.cpc_bid_micros,
+      ad_group.type,
+      campaign.id,
+      campaign.name,
+      campaign.bidding_strategy_type
+    FROM ad_group
+    WHERE ad_group.id = ${normalizeResourceId(adGroupId)}
+    LIMIT 1
+  `) as any[];
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    adGroupId: String(row.ad_group?.id ?? adGroupId),
+    name: String(row.ad_group?.name ?? ''),
+    status: String(row.ad_group?.status ?? ''),
+    cpcBidMicros: row.ad_group?.cpc_bid_micros === undefined ? undefined : Number(row.ad_group.cpc_bid_micros),
+    type: String(row.ad_group?.type ?? ''),
+    campaignId: String(row.campaign?.id ?? ''),
+    campaignName: String(row.campaign?.name ?? ''),
+    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined ? undefined : String(row.campaign.bidding_strategy_type),
+  };
+}
+
+export interface CampaignState {
+  campaignId: string;
+  name: string;
+  status: string;
+  biddingStrategyType?: string;
+  budgetId?: string;
+  budgetAmountMicros?: number;
+  budgetExplicitlyShared?: boolean;
+  budgetReferenceCount?: number;
+}
+
+export async function loadCampaignState(cfg: AdsConfig, customerId: string, campaignId: string): Promise<CampaignState | null> {
+  const rows = await executeGaql(cfg, customerId, `
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.status,
+      campaign.bidding_strategy_type,
+      campaign_budget.id,
+      campaign_budget.amount_micros,
+      campaign_budget.explicitly_shared,
+      campaign_budget.reference_count
+    FROM campaign
+    WHERE campaign.id = ${normalizeResourceId(campaignId)}
+    LIMIT 1
+  `) as any[];
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    campaignId: String(row.campaign?.id ?? campaignId),
+    name: String(row.campaign?.name ?? ''),
+    status: String(row.campaign?.status ?? ''),
+    biddingStrategyType: row.campaign?.bidding_strategy_type === undefined ? undefined : String(row.campaign.bidding_strategy_type),
+    budgetId: row.campaign_budget?.id === undefined ? undefined : String(row.campaign_budget.id),
+    budgetAmountMicros: row.campaign_budget?.amount_micros === undefined ? undefined : Number(row.campaign_budget.amount_micros),
+    budgetExplicitlyShared: row.campaign_budget?.explicitly_shared,
+    budgetReferenceCount: row.campaign_budget?.reference_count === undefined ? undefined : Number(row.campaign_budget.reference_count),
+  };
+}
+
+export interface AdState {
+  adId: string;
+  adGroupId: string;
+  adGroupName: string;
+  status: string;
+  type: string;
+  finalUrls: string[];
+  headlines: string[];
+  descriptions: string[];
+}
+
+export async function loadAdState(cfg: AdsConfig, customerId: string, adId: string): Promise<AdState | null> {
+  const rows = await executeGaql(cfg, customerId, buildCloneAdQuery(`ad_group_ad.ad.id = ${normalizeResourceId(adId)}`)) as any[];
+  const row = rows[0];
+  if (!row) return null;
+  const ad = row.ad_group_ad?.ad ?? {};
+  const isDisplay = Boolean(ad.responsive_display_ad);
+  const creative = isDisplay ? ad.responsive_display_ad : ad.responsive_search_ad;
+  return {
+    adId: String(ad.id ?? adId),
+    adGroupId: String(row.ad_group?.id ?? ''),
+    adGroupName: String(row.ad_group?.name ?? ''),
+    status: String(row.ad_group_ad?.status ?? ''),
+    type: String(ad.type ?? ''),
+    finalUrls: (ad.final_urls ?? []) as string[],
+    headlines: textValues(creative?.headlines),
+    descriptions: textValues(creative?.descriptions),
+  };
 }
 
 export function ratioOk(width: number | undefined, height: number | undefined, min: number, max: number): boolean {

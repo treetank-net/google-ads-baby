@@ -10,10 +10,15 @@ import {
   analyzePmaxBreakdown,
   analyzeScalingCandidates,
   analyzeSearchTermsWaste,
+  analyzeDisplayRemarketing,
   buildHygieneQuery,
   buildPmaxQuery,
   buildScalingQuery,
   buildSearchTermsQuery,
+  buildDisplayCampaignQuery,
+  buildDisplayAdGroupQuery,
+  buildDisplayAudienceQuery,
+  buildUserListQuery,
   summarize,
   windowClause,
   type Finding,
@@ -21,6 +26,10 @@ import {
   type PmaxAssetGroupRow,
   type ScalingRow,
   type SearchTermRow,
+  type DisplayCampaignRow,
+  type DisplayAdGroupRow,
+  type DisplayAudienceRow,
+  type UserListRow,
 } from './analysis-helpers.js';
 
 function report(name: string, customerId: string, extra: Record<string, unknown>) {
@@ -123,6 +132,55 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           excluded_bounce_back,
           summary: summarize(findings),
           findings,
+          follow_up: followUp,
+        });
+      } catch (err) {
+        return { content: [{ type: 'text', text: formatError(err) }] };
+      }
+    },
+  );
+
+  server.tool(
+    'get_display_remarketing_diagnostics',
+    'Read-only delivery diagnostics for Display remarketing campaigns: checks serving status, whether any user list is ' +
+      'attached, audience size against the ~100-user Display minimum, Display eligibility and membership duration of each ' +
+      'list, paused ad groups inside enabled campaigns, and manual CPC bids low enough to suppress delivery. When the ' +
+      'campaign uses automated bidding it says so explicitly, because then CPC changes cannot fix delivery. Use this ' +
+      'before changing bids on a campaign that is not serving. Does not mutate anything.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID'),
+      days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+    },
+    async ({ customer_id, days }) => {
+      const validationError = requireCustomerId(customer_id);
+      if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
+      try {
+        const cid = normalizeCustomerId(customer_id);
+        const windowDays = Number(days);
+        const notChecked: string[] = [];
+        const fetchOptional = async <T>(label: string, query: string): Promise<T[]> => {
+          try {
+            return (await executeGaql(cfg, cid, query)) as T[];
+          } catch (err) {
+            notChecked.push(`${label} — ${formatError(err)}`);
+            return [];
+          }
+        };
+        const campaigns = (await executeGaql(cfg, cid, buildDisplayCampaignQuery(windowClause(windowDays)))) as DisplayCampaignRow[];
+        const [adGroups, audiences, userLists] = await Promise.all([
+          fetchOptional<DisplayAdGroupRow>('ad groups', buildDisplayAdGroupQuery()),
+          fetchOptional<DisplayAudienceRow>('audience links', buildDisplayAudienceQuery()),
+          fetchOptional<UserListRow>('user lists', buildUserListQuery()),
+        ]);
+        const { findings, audience_coverage } = analyzeDisplayRemarketing({ campaigns, adGroups, audiences, userLists }, windowDays);
+        return report('display_remarketing_diagnostics', cid, {
+          window_days: windowDays,
+          campaigns_scanned: campaigns.length,
+          ad_groups_scanned: adGroups.length,
+          audience_coverage,
+          summary: summarize(findings),
+          findings,
+          not_checked: notChecked,
           follow_up: followUp,
         });
       } catch (err) {

@@ -101,22 +101,45 @@ export function readHistory(filter: HistoryFilter = {}): HistoryEntry[] {
   return entries.slice(0, limit);
 }
 
+const UPDATE_IDENTIFIER_KEYS = new Set([
+  'customer_id',
+  'customerId',
+  'campaign_id',
+  'ad_group_id',
+  'ad_id',
+  'budget_id',
+  'creative_kind',
+]);
+
+export function updatedFieldNames(params: Record<string, unknown> | undefined): string[] {
+  if (!params) return [];
+  return Object.entries(params)
+    .filter(([key, value]) => !UPDATE_IDENTIFIER_KEYS.has(key) && value !== undefined && value !== null)
+    .map(([key]) => key);
+}
+
 export function getHistoryStats(customerId?: string): {
   total: number;
   succeeded: number;
   failed: number;
   byAction: Record<string, number>;
+  updatedFieldsByAction: Record<string, Record<string, number>>;
   recentActions: string[];
   usedAssetIds: string[];
 } {
   const all = readHistory({ customerId, limit: 10000 });
   const byAction: Record<string, number> = {};
+  const updatedFieldsByAction: Record<string, Record<string, number>> = {};
   const assetSet = new Set<string>();
   let succeeded = 0;
   let failed = 0;
 
   for (const e of all) {
     byAction[e.action] = (byAction[e.action] || 0) + 1;
+    if (e.action.endsWith('_update')) {
+      const fields = updatedFieldsByAction[e.action] ?? (updatedFieldsByAction[e.action] = {});
+      for (const field of updatedFieldNames(e.params)) fields[field] = (fields[field] || 0) + 1;
+    }
     if (e.success) succeeded++;
     else failed++;
     for (const id of e.assetIds ?? []) assetSet.add(id);
@@ -124,5 +147,5 @@ export function getHistoryStats(customerId?: string): {
 
   const recent = all.slice(0, 10).map((e) => `${e.timestamp} ${e.action} ${e.success ? 'OK' : 'FAIL'}: ${e.preview.split('\n')[0]}`);
 
-  return { total: all.length, succeeded, failed, byAction, recentActions: recent, usedAssetIds: [...assetSet] };
+  return { total: all.length, succeeded, failed, byAction, updatedFieldsByAction, recentActions: recent, usedAssetIds: [...assetSet] };
 }

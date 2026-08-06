@@ -5,7 +5,6 @@ import { createToken } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId } from '../validation.js';
 import {
   MAX_BUDGET_MICROS,
-  MAX_CPC_MICROS,
   MAX_TARGETING_CRITERIA_PER_MUTATION,
   MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION,
   MAX_CONVERSION_GOALS_PER_MUTATION,
@@ -21,6 +20,9 @@ import {
   campaignAssetFieldTypeSchema,
   adGroupCriterionResourceNameSchema,
   negativeTopicSchema,
+  entityStatusSchema,
+  biddingStrategyTypeSchema,
+  targetRoasSchema,
 } from './write-schemas.js';
 import {
   validationResult,
@@ -29,6 +31,18 @@ import {
   prepareResponse,
   loadImageAssetInfo,
   validateAssetPlacement,
+  plnToMicros,
+  formatPln,
+  plnFieldLimitError,
+  budgetLimitError,
+  cpcLimitError,
+  targetCpaLimitError,
+  changeLine,
+  microsChangeLine,
+  manualBiddingRequiredWarning,
+  sharedBudgetWarning,
+  loadAdGroupState,
+  loadCampaignState,
 } from './write-helpers.js';
 import {
   buildSearchCampaignPayload,
@@ -104,19 +118,92 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, budget_id, campaign_name, current_budget_pln, new_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const newMicros = Math.round(new_budget_pln * 1_000_000);
-      if (newMicros > MAX_BUDGET_MICROS) {
-        return {
-          content: [{
-            type: 'text',
-            text: `Error: Budget ${new_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`,
-          }],
-        };
-      }
+      const budgetError = budgetLimitError(new_budget_pln);
+      if (budgetError) return validationResult(budgetError);
+      const newMicros = plnToMicros(new_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedBudgetId = normalizeResourceId(budget_id);
       const preview = `Change budget of campaign "${campaign_name}": ${current_budget_pln} -> ${new_budget_pln} PLN/day (account ${normalizedCustomerId})`;
       const mutation = createToken('budget_change', { customer_id: normalizedCustomerId, budget_id: normalizedBudgetId, amount_micros: newMicros }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_campaign_update',
+    'Prepare an update to an existing campaign (name, status, daily budget, bidding strategy). Reads the current values first and previews them as before -> after, including a warning when the budget is shared. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      campaign_id: z.string().describe('Existing campaign ID'),
+      name: z.string().min(1).optional().describe('New campaign name'),
+      status: entityStatusSchema.optional().describe('New campaign status'),
+      daily_budget_pln: z.number().positive().optional().describe('New daily budget in PLN; capped by server safety limit. Applies to the budget resource linked to this campaign, which may be shared with other campaigns.'),
+      strategy_type: biddingStrategyTypeSchema.optional().describe('New bidding strategy type'),
+      target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN, required for TARGET_CPA; capped by server safety limit'),
+      target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400%; required for TARGET_ROAS'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, campaign_id, name, status, daily_budget_pln, strategy_type, target_cpa_pln, target_roas, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      if (name === undefined && status === undefined && daily_budget_pln === undefined && strategy_type === undefined) {
+        return validationResult('Provide at least one field to update.');
+      }
+      if (daily_budget_pln !== undefined) {
+        const limitError = budgetLimitError(daily_budget_pln);
+        if (limitError) return validationResult(limitError);
+      }
+      if (target_cpa_pln !== undefined) {
+        const limitError = targetCpaLimitError(target_cpa_pln);
+        if (limitError) return validationResult(limitError);
+      }
+      if (strategy_type === 'TARGET_CPA' && target_cpa_pln === undefined) {
+        return validationResult('target_cpa_pln is required for TARGET_CPA strategy.');
+      }
+      if (strategy_type === 'TARGET_ROAS' && target_roas === undefined) {
+        return validationResult('target_roas is required for TARGET_ROAS strategy.');
+      }
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedCampaignId = normalizeResourceId(campaign_id);
+      const state = await loadCampaignState(cfg, normalizedCustomerId, normalizedCampaignId);
+      if (!state) return validationResult(`Campaign ${normalizedCampaignId} not found on account ${normalizedCustomerId}.`);
+      if (daily_budget_pln !== undefined && !state.budgetId) {
+        return validationResult(`Campaign ${normalizedCampaignId} has no readable budget resource; use prepare_budget_change with an explicit budget_id.`);
+      }
+      const budgetMicros = daily_budget_pln === undefined ? undefined : plnToMicros(daily_budget_pln);
+      const targetCpaMicros = target_cpa_pln === undefined ? undefined : plnToMicros(target_cpa_pln);
+      const lines = [`Update campaign ${normalizedCampaignId} "${state.name}", account ${normalizedCustomerId}`];
+      if (name !== undefined) lines.push(changeLine('Name', state.name, name));
+      if (status !== undefined) lines.push(changeLine('Status', state.status, status));
+      if (budgetMicros !== undefined) {
+        lines.push(microsChangeLine('Daily budget', state.budgetAmountMicros, budgetMicros));
+        const budgetWarning = sharedBudgetWarning(state.budgetReferenceCount, state.budgetExplicitlyShared);
+        if (budgetWarning) lines.push(budgetWarning);
+      }
+      if (strategy_type !== undefined) {
+        const target = strategy_type === 'TARGET_CPA'
+          ? ` (Target CPA: ${formatPln(targetCpaMicros)})`
+          : strategy_type === 'TARGET_ROAS'
+          ? ` (Target ROAS: ${target_roas}x)`
+          : '';
+        lines.push(`${changeLine('Bidding strategy', state.biddingStrategyType, strategy_type)}${target}`);
+      }
+      const apiCallCount = [name !== undefined || status !== undefined, budgetMicros !== undefined, strategy_type !== undefined].filter(Boolean).length;
+      if (apiCallCount > 1) {
+        lines.push(`Note: this runs as ${apiCallCount} separate Google Ads API calls (campaign, budget, bidding). A failure partway through can leave the update partially applied.`);
+      }
+      const preview = lines.join('\n');
+      const mutation = createToken('campaign_update', {
+        customer_id: normalizedCustomerId,
+        campaign_id: normalizedCampaignId,
+        name,
+        status,
+        budget_id: budgetMicros === undefined ? undefined : state.budgetId,
+        amount_micros: budgetMicros,
+        strategy_type,
+        target_cpa_micros: targetCpaMicros,
+        target_roas,
+      }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },
   );
@@ -133,10 +220,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
-      if (budgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const budgetError = budgetLimitError(daily_budget_pln);
+      if (budgetError) return validationResult(budgetError);
+      const budgetMicros = plnToMicros(daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const preview = `Create paused Search campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
       const mutation = createToken('search_campaign_create', {
@@ -196,10 +282,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
       if (customerError) return customerError;
-      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
-      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const limitError = plnFieldLimitError(args);
+      if (limitError) return validationResult(limitError);
+      const dailyBudgetMicros = plnToMicros(args.daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(args.customer_id);
 
       const payload = buildSearchCampaignPayload({
@@ -273,10 +358,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
       if (customerError) return customerError;
-      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
-      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const limitError = plnFieldLimitError(args);
+      if (limitError) return validationResult(limitError);
+      const dailyBudgetMicros = plnToMicros(args.daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(args.customer_id);
 
       const payload = buildDisplayCampaignPayload({
@@ -345,10 +429,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async (args) => {
       const customerError = validateCustomer(args.customer_id);
       if (customerError) return customerError;
-      const dailyBudgetMicros = Math.round(args.daily_budget_pln * 1_000_000);
-      if (dailyBudgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${args.daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const limitError = plnFieldLimitError(args);
+      if (limitError) return validationResult(limitError);
+      const dailyBudgetMicros = plnToMicros(args.daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(args.customer_id);
 
       const payload = buildPerformanceMaxPayload({
@@ -389,10 +472,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, campaign_name, daily_budget_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
-      if (budgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const budgetError = budgetLimitError(daily_budget_pln);
+      if (budgetError) return validationResult(budgetError);
+      const budgetMicros = plnToMicros(daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const preview = `Create paused Display campaign "${campaign_name}" with budget ${daily_budget_pln} PLN/day on account ${normalizedCustomerId}`;
       const mutation = createToken('display_campaign_create', {
@@ -418,10 +500,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, campaign_name, daily_budget_pln, business_name_asset_id, logo_asset_id, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const budgetMicros = Math.round(daily_budget_pln * 1_000_000);
-      if (budgetMicros > MAX_BUDGET_MICROS) {
-        return validationResult(`Budget ${daily_budget_pln} PLN exceeds the safety limit (${MAX_BUDGET_MICROS / 1_000_000} PLN/day).`);
-      }
+      const budgetError = budgetLimitError(daily_budget_pln);
+      if (budgetError) return validationResult(budgetError);
+      const budgetMicros = plnToMicros(daily_budget_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedBusinessNameAssetId = business_name_asset_id ? normalizeResourceId(business_name_asset_id) : undefined;
       const normalizedLogoAssetId = logo_asset_id ? normalizeResourceId(logo_asset_id) : undefined;
@@ -459,10 +540,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const cpcMicros = Math.round(cpc_bid_pln * 1_000_000);
-      if (cpcMicros > MAX_CPC_MICROS) {
-        return validationResult(`CPC bid ${cpc_bid_pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`);
-      }
+      const cpcError = cpcLimitError(cpc_bid_pln);
+      if (cpcError) return validationResult(cpcError);
+      const cpcMicros = plnToMicros(cpc_bid_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
       const preview = `Create paused ad group "${ad_group_name}" in campaign ${normalizedCampaignId}, max CPC ${cpc_bid_pln} PLN, account ${normalizedCustomerId}`;
@@ -490,10 +570,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_pln, optimized_targeting_enabled, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
-      const cpcMicros = Math.round(cpc_bid_pln * 1_000_000);
-      if (cpcMicros > MAX_CPC_MICROS) {
-        return validationResult(`CPC bid ${cpc_bid_pln} PLN exceeds the safety limit (${MAX_CPC_MICROS / 1_000_000} PLN).`);
-      }
+      const cpcError = cpcLimitError(cpc_bid_pln);
+      if (cpcError) return validationResult(cpcError);
+      const cpcMicros = plnToMicros(cpc_bid_pln);
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
       const optimizedTargetingLine = optimized_targeting_enabled === undefined
@@ -515,26 +594,48 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
   );
 
   server.tool(
-    'prepare_ad_group_settings',
-    'Prepare updating settings on an existing ad group. Currently toggles optimized targeting (set false to stop delivery outside your audience selection). Returns a preview and confirmation token.',
+    'prepare_ad_group_update',
+    'Prepare an update to an existing ad group (max CPC bid, status, name, optimized targeting). Reads the current values first and previews them as before -> after. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       ad_group_id: z.string().describe('Existing ad group ID'),
-      optimized_targeting_enabled: z.boolean().describe('Optimized targeting flag: true to enable, false to disable'),
+      cpc_bid_pln: z.number().positive().optional().describe('New max CPC bid in PLN; capped by server safety limit. Only affects delivery when the campaign uses MANUAL_CPC.'),
+      status: entityStatusSchema.optional().describe('New ad group status'),
+      name: z.string().min(1).optional().describe('New ad group name'),
+      optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag: true to enable, false to keep delivery within your audience selection'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
     },
-    async ({ customer_id, ad_group_id, optimized_targeting_enabled, safe_word }) => {
+    async ({ customer_id, ad_group_id, cpc_bid_pln, status, name, optimized_targeting_enabled, safe_word }) => {
       const customerError = validateCustomer(customer_id);
       if (customerError) return customerError;
+      if (cpc_bid_pln === undefined && status === undefined && name === undefined && optimized_targeting_enabled === undefined) {
+        return validationResult('Provide at least one field to update.');
+      }
+      if (cpc_bid_pln !== undefined) {
+        const limitError = cpcLimitError(cpc_bid_pln);
+        if (limitError) return validationResult(limitError);
+      }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedAdGroupId = normalizeResourceId(ad_group_id);
-      const preview = [
-        `Update ad group ${normalizedAdGroupId} settings, account ${normalizedCustomerId}`,
-        `Optimized targeting: ${optimized_targeting_enabled ? 'enabled' : 'disabled'}`,
-      ].join('\n');
-      const mutation = createToken('ad_group_settings_update', {
+      const state = await loadAdGroupState(cfg, normalizedCustomerId, normalizedAdGroupId);
+      if (!state) return validationResult(`Ad group ${normalizedAdGroupId} not found on account ${normalizedCustomerId}.`);
+      const cpcMicros = cpc_bid_pln === undefined ? undefined : plnToMicros(cpc_bid_pln);
+      const lines = [
+        `Update ad group ${normalizedAdGroupId} "${state.name}" in campaign "${state.campaignName}" (${state.campaignId}), account ${normalizedCustomerId}`,
+      ];
+      if (cpcMicros !== undefined) lines.push(microsChangeLine('Max CPC', state.cpcBidMicros, cpcMicros));
+      if (status !== undefined) lines.push(changeLine('Status', state.status, status));
+      if (name !== undefined) lines.push(changeLine('Name', state.name, name));
+      if (optimized_targeting_enabled !== undefined) lines.push(`Optimized targeting: ${optimized_targeting_enabled ? 'enabled' : 'disabled'}`);
+      const biddingWarning = cpcMicros === undefined ? null : manualBiddingRequiredWarning(state.biddingStrategyType);
+      if (biddingWarning) lines.push(biddingWarning);
+      const preview = lines.join('\n');
+      const mutation = createToken('ad_group_update', {
         customer_id: normalizedCustomerId,
         ad_group_id: normalizedAdGroupId,
+        cpc_bid_micros: cpcMicros,
+        status,
+        name,
         optimized_targeting_enabled,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
@@ -645,9 +746,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
     {
       customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
       campaign_id: z.string().describe('Existing campaign ID'),
-      strategy_type: z.enum(['TARGET_CPA', 'TARGET_ROAS', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'MANUAL_CPC', 'ENHANCED_CPC']).describe('Bidding strategy type'),
-      target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN (required for TARGET_CPA)'),
-      target_roas: z.number().positive().optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400% ROAS (required for TARGET_ROAS)'),
+      strategy_type: biddingStrategyTypeSchema.describe('Bidding strategy type'),
+      target_cpa_pln: z.number().positive().optional().describe('Target CPA in PLN (required for TARGET_CPA); capped by server safety limit'),
+      target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400% ROAS (required for TARGET_ROAS)'),
       safe_word: safeWordSchema.describe('LLM-invented random confirmation word'),
     },
     async ({ customer_id, campaign_id, strategy_type, target_cpa_pln, target_roas, safe_word }) => {
@@ -658,6 +759,10 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       }
       if (strategy_type === 'TARGET_ROAS' && !target_roas) {
         return validationResult('target_roas is required for TARGET_ROAS strategy.');
+      }
+      if (target_cpa_pln !== undefined) {
+        const limitError = targetCpaLimitError(target_cpa_pln);
+        if (limitError) return validationResult(limitError);
       }
       const normalizedCustomerId = normalizeCustomerId(customer_id);
       const normalizedCampaignId = normalizeResourceId(campaign_id);
@@ -671,7 +776,7 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         customer_id: normalizedCustomerId,
         campaign_id: normalizedCampaignId,
         strategy_type,
-        target_cpa_micros: target_cpa_pln ? Math.round(target_cpa_pln * 1_000_000) : undefined,
+        target_cpa_micros: target_cpa_pln ? plnToMicros(target_cpa_pln) : undefined,
         target_roas,
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);

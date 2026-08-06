@@ -222,17 +222,48 @@ export async function createDisplayAdGroup(
   return customer.adGroups.create([resource as any]);
 }
 
-export async function updateAdGroupSettings(
+export interface AdGroupPatch {
+  cpcBidMicros?: number;
+  status?: 'ENABLED' | 'PAUSED';
+  name?: string;
+  optimizedTargetingEnabled?: boolean;
+}
+
+export async function updateAdGroup(
   cfg: AdsConfig,
   customerId: string,
   adGroupId: string,
-  settings: { optimizedTargetingEnabled: boolean },
+  patch: AdGroupPatch,
 ): Promise<unknown> {
   const customer = getCustomer(cfg, customerId);
-  return customer.adGroups.update([{
+  const resource: Record<string, any> = {
     resource_name: ResourceNames.adGroup(customerId, adGroupId),
-    optimized_targeting_enabled: settings.optimizedTargetingEnabled,
-  }]);
+  };
+  if (patch.cpcBidMicros !== undefined) resource.cpc_bid_micros = patch.cpcBidMicros;
+  if (patch.status !== undefined) resource.status = enums.AdGroupStatus[patch.status];
+  if (patch.name !== undefined) resource.name = patch.name;
+  if (patch.optimizedTargetingEnabled !== undefined) resource.optimized_targeting_enabled = patch.optimizedTargetingEnabled;
+  return customer.adGroups.update([resource as any]);
+}
+
+export interface CampaignPatch {
+  name?: string;
+  status?: 'ENABLED' | 'PAUSED';
+}
+
+export async function updateCampaign(
+  cfg: AdsConfig,
+  customerId: string,
+  campaignId: string,
+  patch: CampaignPatch,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  const resource: Record<string, any> = {
+    resource_name: `customers/${customerId}/campaigns/${campaignId}`,
+  };
+  if (patch.name !== undefined) resource.name = patch.name;
+  if (patch.status !== undefined) resource.status = enums.CampaignStatus[patch.status];
+  return customer.campaigns.update([resource]);
 }
 
 export async function removeAdGroupCriteria(

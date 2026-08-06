@@ -44,7 +44,7 @@ export function registerHistoryReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_mutation_stats',
-    'Get summary statistics of past mutations: total count, success/fail rate, breakdown by action type, recently used asset IDs.',
+    'Get summary statistics of past mutations: total count, success/fail rate, breakdown by action type, which fields were changed for *_update actions, recently used asset IDs.',
     {
       customer_id: z.string().optional().describe('Filter stats by customer ID'),
     },

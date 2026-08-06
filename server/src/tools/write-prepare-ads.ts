@@ -13,6 +13,7 @@ import {
   cloneEntitySchema,
   keywordSchema,
   negativeKeywordLevelSchema,
+  entityStatusSchema,
 } from './write-schemas.js';
 import {
   validationResult,
@@ -25,8 +26,11 @@ import {
   buildCloneAdQuery,
   validateResponsiveSearchInput,
   validateResponsiveDisplayInput,
+  validateResponsiveDisplayText,
   loadImageAssetInfo,
   validateAssetPlacement,
+  loadAdState,
+  changeLine,
 } from './write-helpers.js';
 
 export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void {
@@ -344,6 +348,73 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
         customer_id: normalizedCustomerId,
         ad_group_id: normalizedAdGroupId,
         keywords: normalizedKeywords,
+      }, preview, normalizeSafeWord(safe_word));
+      return prepareResponse(cfg, mutation, preview);
+    },
+  );
+
+  server.tool(
+    'prepare_ad_update',
+    'Prepare an update to an existing responsive search or responsive display ad (status, final URL, headlines, descriptions). Reads the current creative first and previews it as before -> after. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    {
+      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      ad_id: z.string().describe('Existing ad ID (from execute_gaql or list_ads_entities)'),
+      status: entityStatusSchema.optional().describe('New ad status'),
+      final_url: z.string().url().optional().describe('New landing page URL'),
+      headlines: z.array(z.string().min(1)).optional().describe('Replacement headlines; replaces the full list. Search ads need 3-15, display ads 1-5, max 30 chars each.'),
+      descriptions: z.array(z.string().min(1)).optional().describe('Replacement descriptions; replaces the full list. Search ads need 2-4, display ads 1-5, max 90 chars each.'),
+      safe_word: safeWordSchema.describe('LLM-invented random confirmation word, e.g. "cactus" or "orbit"; must be shown to the user'),
+    },
+    async ({ customer_id, ad_id, status, final_url, headlines, descriptions, safe_word }) => {
+      const customerError = validateCustomer(customer_id);
+      if (customerError) return customerError;
+      if (status === undefined && final_url === undefined && headlines === undefined && descriptions === undefined) {
+        return validationResult('Provide at least one field to update.');
+      }
+      const normalizedCustomerId = normalizeCustomerId(customer_id);
+      const normalizedAdId = normalizeResourceId(ad_id);
+      const state = await loadAdState(cfg, normalizedCustomerId, normalizedAdId);
+      if (!state) return validationResult(`Ad ${normalizedAdId} not found on account ${normalizedCustomerId}.`);
+      const isSearch = state.type === 'RESPONSIVE_SEARCH_AD';
+      const isDisplay = state.type === 'RESPONSIVE_DISPLAY_AD';
+      const textChanged = headlines !== undefined || descriptions !== undefined;
+      if (textChanged && !isSearch && !isDisplay) {
+        return validationResult(`Ad ${normalizedAdId} is ${state.type || 'of an unsupported type'}; text updates are supported only for RESPONSIVE_SEARCH_AD and RESPONSIVE_DISPLAY_AD. Use prepare_clone_entity to build a replacement ad instead.`);
+      }
+      const nextHeadlines = headlines ?? state.headlines;
+      const nextDescriptions = descriptions ?? state.descriptions;
+      if (textChanged) {
+        const textError = isSearch
+          ? validateResponsiveSearchInput(nextHeadlines, nextDescriptions)
+          : validateResponsiveDisplayText(nextHeadlines, nextDescriptions);
+        if (textError) return validationResult(textError);
+      }
+      const lines = [
+        `Update ad ${normalizedAdId} (${state.type}) in ad group "${state.adGroupName}" (${state.adGroupId}), account ${normalizedCustomerId}`,
+      ];
+      if (status !== undefined) lines.push(changeLine('Status', state.status, status));
+      if (final_url !== undefined) lines.push(changeLine('Final URL', state.finalUrls[0], final_url));
+      if (headlines !== undefined) {
+        lines.push(changeLine('Headlines', `${state.headlines.length} item(s)`, `${nextHeadlines.length} item(s)`));
+        lines.push(...nextHeadlines.map((headline) => `  - ${headline}`));
+      }
+      if (descriptions !== undefined) {
+        lines.push(changeLine('Descriptions', `${state.descriptions.length} item(s)`, `${nextDescriptions.length} item(s)`));
+        lines.push(...nextDescriptions.map((description) => `  - ${description}`));
+      }
+      if (textChanged) {
+        lines.push('Warning: this replaces the ad text in place, so the previous wording is lost and asset-level performance data restarts for the changed assets. Clone the ad first if you want to keep the current version running.');
+      }
+      const preview = lines.join('\n');
+      const mutation = createToken('ad_update', {
+        customer_id: normalizedCustomerId,
+        ad_group_id: state.adGroupId,
+        ad_id: normalizedAdId,
+        status,
+        final_url,
+        headlines: headlines === undefined ? undefined : nextHeadlines,
+        descriptions: descriptions === undefined ? undefined : nextDescriptions,
+        creative_kind: isDisplay ? 'responsive_display_ad' : 'responsive_search_ad',
       }, preview, normalizeSafeWord(safe_word));
       return prepareResponse(cfg, mutation, preview);
     },

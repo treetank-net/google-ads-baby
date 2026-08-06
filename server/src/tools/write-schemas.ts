@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const MAX_BUDGET_MICROS = 500_000_000; // 500 PLN safety cap
 export const MAX_CPC_MICROS = 50_000_000; // 50 PLN safety cap
+export const MAX_TARGET_CPA_MICROS = 500_000_000; // 500 PLN safety cap
+export const MAX_TARGET_ROAS = 100; // 10000% sanity cap
 export const MAX_IMAGE_BYTES = 10_000_000; // 10 MB safety cap
 export const MAX_KEYWORDS_PER_MUTATION = 100;
 export const MAX_TARGETING_CRITERIA_PER_MUTATION = 100;
@@ -31,6 +33,16 @@ export const keywordSchema = z.object({
   match_type: keywordMatchTypeSchema.describe('Keyword match type'),
 });
 export const negativeKeywordLevelSchema = z.enum(['campaign', 'ad_group']);
+export const entityStatusSchema = z.enum(['ENABLED', 'PAUSED']);
+export const biddingStrategyTypeSchema = z.enum([
+  'TARGET_CPA',
+  'TARGET_ROAS',
+  'MAXIMIZE_CONVERSIONS',
+  'MAXIMIZE_CONVERSION_VALUE',
+  'MANUAL_CPC',
+  'ENHANCED_CPC',
+]);
+export const targetRoasSchema = z.number().positive().max(MAX_TARGET_ROAS);
 export const criterionIdListSchema = z.array(z.string().regex(/^\d+$/, 'Criterion IDs must be numeric')).max(MAX_TARGETING_CRITERIA_PER_MUTATION);
 export const assetFieldTypeSchema = z.enum([
   'HEADLINE',

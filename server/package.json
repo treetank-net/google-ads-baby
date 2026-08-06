@@ -1,11 +1,12 @@
 {
   "name": "google-ads-baby-server",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Google Ads MCP server with two-phase mutation safety",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && npx esbuild dist/index.js --bundle --platform=node --target=node18 --format=cjs --minify --outfile=bundle.cjs",
+    "test": "tsc -p tsconfig.test.json && node dist-test/test/smoke.js",
     "dev": "tsc --watch",
     "start": "node bundle.cjs"
   },

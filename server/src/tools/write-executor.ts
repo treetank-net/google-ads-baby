@@ -35,7 +35,9 @@ import {
   mutateKeywordStatus,
   removeAdGroupCriteria,
   removeCampaigns,
-  updateAdGroupSettings,
+  updateAd,
+  updateAdGroup,
+  updateCampaign,
   updateCampaignConversionGoals,
   updateDemographicBidModifiers,
   uploadImageAssetFromFile,
@@ -91,8 +93,39 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   if (mutation.action === 'ad_group_create') return ok(await createAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros));
   if (mutation.action === 'display_ad_group_create') return ok(await createDisplayAdGroup(cfg, p.customer_id, p.campaign_id, p.ad_group_name, p.cpc_bid_micros, { optimizedTargetingEnabled: p.optimized_targeting_enabled }));
 
-  if (mutation.action === 'ad_group_settings_update') {
-    return ok(await updateAdGroupSettings(cfg, p.customer_id, p.ad_group_id, { optimizedTargetingEnabled: p.optimized_targeting_enabled }));
+  if (mutation.action === 'ad_group_update') {
+    return ok(await updateAdGroup(cfg, p.customer_id, p.ad_group_id, {
+      cpcBidMicros: p.cpc_bid_micros,
+      status: p.status,
+      name: p.name,
+      optimizedTargetingEnabled: p.optimized_targeting_enabled,
+    }));
+  }
+
+  if (mutation.action === 'campaign_update') {
+    const results: unknown[] = [];
+    if (p.name !== undefined || p.status !== undefined) {
+      results.push(await updateCampaign(cfg, p.customer_id, p.campaign_id, { name: p.name, status: p.status }));
+    }
+    if (p.amount_micros !== undefined) {
+      results.push(await mutateCampaignBudget(cfg, p.customer_id, p.budget_id, p.amount_micros));
+    }
+    if (p.strategy_type !== undefined) {
+      results.push(await mutateBiddingStrategy(cfg, p.customer_id, p.campaign_id, {
+        type: p.strategy_type, targetCpaMicros: p.target_cpa_micros, targetRoas: p.target_roas,
+      }));
+    }
+    return ok(results.length === 1 ? results[0] : results);
+  }
+
+  if (mutation.action === 'ad_update') {
+    return ok(await updateAd(cfg, p.customer_id, p.ad_group_id, p.ad_id, {
+      status: p.status,
+      finalUrl: p.final_url,
+      headlines: p.headlines,
+      descriptions: p.descriptions,
+      creativeKind: p.creative_kind,
+    }));
   }
 
   if (mutation.action === 'remove_ad_group_criterion') {

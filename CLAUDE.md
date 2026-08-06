@@ -35,16 +35,16 @@ tools/
   read.ts                 — orchestrator: registerReadTools()
   read-helpers.ts         — schemas, query builders, pure functions
   read-accounts.ts        — list_accounts, get_campaigns, execute_gaql, list_ads_entities, get_ad_blueprint
-  read-analysis.ts        — read-only review loops: get_account_hygiene_report, get_budget_scaling_candidates, get_search_terms_waste_candidates, get_pmax_channel_breakdown
+  read-analysis.ts        — read-only review loops: get_account_hygiene_report, get_budget_scaling_candidates, get_search_terms_waste_candidates, get_pmax_channel_breakdown, get_display_remarketing_diagnostics
   analysis-helpers.ts     — thresholds (BDOS DAILY/MONTHLY_DEFAULTS), GAQL query builders, and pure analyzer functions for read-analysis.ts (unit-tested in smoke)
   read-history.ts         — get_mutation_history, get_mutation_stats
   write.ts                — orchestrator: registerWriteTools()
   write-schemas.ts        — Zod schemas, safety constants (budget caps, limits)
   write-helpers.ts        — validation, image inspection, preview formatting
   write-executor.ts       — executeMutation() dispatcher, formatMutationError()
-  write-prepare-campaigns.ts — prepare_campaign_status, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
+  write-prepare-campaigns.ts — prepare_campaign_status, prepare_campaign_update, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_ad_group, prepare_ad_group_update, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
   write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
-  write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status
+  write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status, prepare_ad_update
   write-confirm.ts        — get_safety_setup, confirm_safe_word, confirm_mutation, confirm_all_mutations
 ```
 
@@ -77,9 +77,16 @@ tools/
 2. Eksportuj funkcję — barrel `client/index.ts` + `client.ts` propaguje automatycznie
 3. Sygnatura: `(cfg: AdsConfig, customerId: string, ...params) => Promise<unknown>`
 
+**Konwencja toolów `*_update` (PATCH na istniejącej encji):**
+- Symetria z `meta-ads-baby`: `prepare_ad_group_update` ≈ `prepare_ad_set_update`, `prepare_campaign_update`, `prepare_ad_update`. Wąskie toole (`prepare_campaign_status`, `prepare_budget_change`, `prepare_bidding_strategy`, `prepare_ad_status`) **współistnieją** z update'ami — tak samo jak w meta.
+- Wszystkie pola opcjonalne + walidacja „podaj min. jedno pole".
+- Preview **musi** pokazywać `before → after`: handler czyta stan encji (`loadAdGroupState` / `loadCampaignState` / `loadAdState` w `write-helpers.ts`) przed utworzeniem tokenu. Kwoty przez `microsChangeLine()` (dokłada krotność/procent zmiany), pozostałe pola przez `changeLine()`.
+- Ostrzeżenia kontekstowe w preview: `manualBiddingRequiredWarning()` (CPC ignorowany przy automatycznej strategii), `sharedBudgetWarning()` (budżet współdzielony przez N kampanii).
+- Gdy jedna akcja wymaga kilku wywołań API (`campaign_update` = campaign + budget + bidding), preview mówi o braku atomowości.
+
 **Konwencje:**
 - Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
-- Budget/CPC walidacja przez stałe z `write-schemas.ts` (MAX_BUDGET_MICROS, MAX_CPC_MICROS)
+- Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `plnFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_pln` wg reguł `PLN_FIELD_LIMITS`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_pln` z absurdalną kwotą, więc pominięty limit oblewa testy.
 - Customer ID normalizacja: `normalizeCustomerId()` + `validateCustomer()` na początku każdego handlera
 - Nie dodawaj komentarzy w kodzie — nazwy funkcji/zmiennych muszą być samodokumentujące
 
@@ -125,6 +132,7 @@ Multiple `prepare_*` calls can share the same `safe_word`. After one user confir
 
 ## Commands
 - `node scripts/generate-readme-tools.mjs` — regeneruj listę tooli w README z `server/src/tools/` (uruchamiaj po każdym dodaniu/zmianie nazwy toola)
+- `cd server && npm test` — kompiluje `src/` + `test/` przez `tsconfig.test.json` do `dist-test/` i uruchamia smoke testy (czyste analizatory, helpery limitów, kontrakt toolów, sweep capów)
 - `cd server && npm install && npm run build` — zainstaluj zależności, skompiluj TS i zbuduj bundle
 - `cd server && npm run dev` — watch mode (rebuild TS przy zmianach, bundle trzeba przebudować ręcznie)
 - `cd server && npm start` — uruchom MCP server z bundle.cjs
@@ -240,15 +248,20 @@ Problem: `npm install` przy cold start trwał 30-60s (timeout w Claude Desktop).
 - [x] Dodać `prepare_campaign_shared_set` — linkowanie shared negative keyword lists
 - [x] Dodać `prepare_ad_schedule` — harmonogram reklam z bid modifierami
 - [x] Fix: sitelink `final_urls` przeniesione na poziom asset (query params w URLach działają poprawnie)
-- [ ] Dodać `prepare_ad_group_status` — pauza/wznowienie ad groupów
+- [x] Dodać `prepare_ad_group_update` — PATCH istniejącej grupy reklam (max CPC, status, nazwa, optimized targeting). Zastąpił `prepare_ad_group_settings` i domknął zaległe `prepare_ad_group_status`. Zgłoszone z zewnątrz: brak zmiany CPC na istniejącej grupie blokował diagnostykę martwych remarketingów Display (konta SK/CZ/HU/LT).
+- [x] Dodać `prepare_campaign_update` i `prepare_ad_update` — pełna symetria z `meta-ads-baby` (`prepare_ad_set_update` / `prepare_campaign_update` / `prepare_ad_update`)
 - [ ] Lepsze error handling w MCP server (Google Ads API errors → czytelne komunikaty po polsku)
 
 ### Średnioterminowe
 - [ ] OS dialog fallback (`zenity`/`osascript`) dla klientów bez hooków — konfigurowalny w env var
 - [x] Audit log — `mutation-history.jsonl` + `get_mutation_history` / `get_mutation_stats` toole
 - [x] Read-only review loops (P1) — `get_account_hygiene_report`, `get_budget_scaling_candidates`, `get_search_terms_waste_candidates`, `get_pmax_channel_breakdown`. Zwracają findings + suggested_task (do `append_task` w `marketing-context`) + prepare_actions. Progi = workflowy wiedzy. Czysta logika testowana w smoke; E2E na żywym koncie dalej TODO.
+- [x] Diagnostyka dostarczania Display/remarketing — `get_display_remarketing_diagnostics`: serving_status, brak podłączonej listy, rozmiar listy vs ~100 użytkowników wymaganych przez Display, `eligible_for_display`, membership duration, pauzy grup w aktywnej kampanii, manual CPC przy podłodze. Przy automatycznej strategii stawek zwraca jawne `bids_not_the_constraint` — po to, żeby nikt nie „naprawiał" braku emisji podnoszeniem CPC.
+- [x] Jedno miejsce egzekwowania limitów kwotowych + sweep w testach po wszystkich toolach i polach `*_pln` (wcześniej capy były kopiowanym `if`-em w każdym handlerze; `target_cpa_pln` i zagnieżdżone `cpc_bid_pln` w `*_full` nie miały żadnego limitu)
 - [ ] Rate limiting — max N mutacji na minutę (server-side)
-- [ ] Konfigurowalny budget cap per-account (nie globalny 500 PLN)
+- [ ] Waluta konta w preview i komunikatach limitów — `listAccounts` już czyta `customer_client.currency_code`, warstwa write go ignoruje. Dziś komunikat „500 PLN" na koncie EUR/CZK/HUF jest nieprawdziwy: cap to zawsze 500 **jednostek waluty konta** (≈2100 zł na EUR, ≈5 zł na HUF).
+- [ ] Przenazwać pola `*_pln` → `*_amount` („in account currency units”), `formatPln` → `formatAmount(micros, currency)`; 81 wystąpień, breaking change API tooli
+- [ ] Konfigurowalny budget cap (nie globalny 500) — ustawiany przez użytkownika, domyślnie w relacji X PLN = 1/4 X EUR = 1/4 X USD (500 PLN / 125 EUR / 125 USD) zhardkodowanej na start. Otwarte: domyślne dla walut poza tą trójką (CZK, HUF)
 - [ ] Toole do tworzenia kampanii (`prepare_campaign_create`) — najczęstszy use case to nowa kampania
       na wzór istniejącej. Cache na struktury kampanii (ad groupy, keywordy, ustawienia) jako template.
 

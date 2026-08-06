@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.16.0
+
+### Added
+- **`prepare_ad_group_update`** — update an existing ad group: max CPC bid, status, name, optimized targeting. Closes a real gap reported from the field: bids could only be set when *creating* an ad group, so reacting to a delivery problem on an existing group meant editing it by hand in the Google Ads UI.
+- **`prepare_campaign_update`** — update an existing campaign: name, status, daily budget, bidding strategy (with target CPA / target ROAS).
+- **`prepare_ad_update`** — update an existing responsive search or responsive display ad: status, final URL, headlines, descriptions.
+- **`get_display_remarketing_diagnostics`** — read-only delivery diagnostics for Display remarketing: `serving_status`, campaigns with no user list attached, audience size against the ~100-user Display minimum, `eligible_for_display`, membership duration, ad groups paused inside enabled campaigns, and manual CPC bids low enough to suppress delivery. When the campaign uses automated bidding it returns an explicit `bids_not_the_constraint` finding, because Google ignores ad group CPC bids there and raising them cannot fix delivery.
+- Preview for every `*_update` tool reads the current values first and shows **before → after**, with the size of the change on amounts (`Max CPC: 0.20 PLN → 2.50 PLN (12.5x more)`), a warning when the campaign's bidding strategy makes a CPC change ineffective, and a warning when a budget is shared with other campaigns.
+- `get_mutation_stats` now breaks `*_update` actions down by which fields were actually changed, so history keeps its resolution now that one action can carry several fields.
+- `npm test` in `server/` runs the smoke suite (98 assertions): pure analyzers, limit helpers, tool contract, and a sweep that calls every money field of every registered tool with an absurd amount.
+
+### Changed
+- Amount limits are enforced in one place (`budgetLimitError` / `cpcLimitError` / `targetCpaLimitError`, plus a recursive `plnFieldLimitError` for nested `*_full` payloads) instead of a hand-copied `if` in each handler.
+- Ad group and campaign `*_update` tools require at least one field, mirroring `meta-ads-baby`'s update tools.
+
+### Fixed
+- `target_cpa_pln` had no upper limit at all (in `prepare_bidding_strategy`), and neither did nested `cpc_bid_pln` / `target_cpa_pln` inside the `*_full` campaign payloads. All amount fields are now capped and covered by tests.
+
+### Removed
+- **`prepare_ad_group_settings`** — replaced by `prepare_ad_group_update`, which covers its only field (`optimized_targeting_enabled`) plus bid, status and name. Update any saved workflow that referenced the old name.
+
+### Known limitation
+- Amount caps and previews still say "PLN" while Google Ads works in **units of the account currency**. On a EUR/CZK/HUF account the cap is 500 units of that currency, not 500 zł, and the message is misleading. The next release adds the account currency to previews and limit messages, renames `*_pln` fields to `*_amount`, and makes the cap configurable.
+
 ## v0.15.1
 
 ### Fixed

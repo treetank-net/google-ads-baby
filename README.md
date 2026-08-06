@@ -148,17 +148,18 @@ Read-only analysis (review loops — findings + suggested follow-up task + possi
 
 - `get_account_hygiene_report` — Read-only daily-check analysis for one account: scans enabled campaigns over a window and flags zero-spend, low budget utilization, and spend-with-no-conversions per the google-ads-daily-check workflow
 - `get_budget_scaling_candidates` — Read-only scan for budget-constrained SEARCH/SHOPPING campaigns: high budget utilization (>= 90%) together with search impression share lost to budget (> 10%), per the google-ads-monthly-review workflow
+- `get_display_remarketing_diagnostics` — Read-only delivery diagnostics for Display remarketing campaigns: checks serving status, whether any user list is attached, audience size against the ~100-user Display minimum, Display eligibility and membership duration of each list, paused ad groups inside enabled campaigns, and manual CPC bids low enough to suppress delivery
 - `get_pmax_channel_breakdown` — Read-only Performance Max analysis: cost/conversions per asset group with each group's share of its campaign spend, flagging asset groups burning budget with 0 conversions
 - `get_search_terms_waste_candidates` — Read-only negative-keyword scan: search terms with cost >= threshold and 0 conversions in the recent window, cross-checked against a longer window so historically-converting terms (bounce-backs) are excluded, per the google-ads-monthly-review workflow
 
 Mutation history:
 
 - `get_mutation_history` — Browse past mutation operations
-- `get_mutation_stats` — Get summary statistics of past mutations: total count, success/fail rate, breakdown by action type, recently used asset IDs
+- `get_mutation_stats` — Get summary statistics of past mutations: total count, success/fail rate, breakdown by action type, which fields were changed for *_update actions, recently used asset IDs
 
 Write preparation — campaigns, budgets, targeting:
 
-- `prepare_ad_group_settings` — Prepare updating settings on an existing ad group
+- `prepare_ad_group_update` — Prepare an update to an existing ad group (max CPC bid, status, name, optimized targeting)
 - `prepare_ad_group` — Prepare creation of a paused Search ad group under an existing campaign
 - `prepare_ad_schedule` — Prepare creating ad schedule criteria (dayparting) with optional bid modifiers for a campaign
 - `prepare_bidding_strategy` — Prepare changing the bidding strategy of a campaign (e.g. from Manual CPC to Target CPA or Target ROAS)
@@ -169,6 +170,7 @@ Write preparation — campaigns, budgets, targeting:
 - `prepare_campaign_shared_set` — Prepare linking an existing shared set (e.g. negative keyword list) to a campaign
 - `prepare_campaign_status` — Prepare a campaign status change (enable/pause)
 - `prepare_campaign_targeting` — Prepare adding location and language targeting criteria to a campaign
+- `prepare_campaign_update` — Prepare an update to an existing campaign (name, status, daily budget, bidding strategy)
 - `prepare_demographic_bid_modifier` — Prepare setting bid modifiers for demographic criteria (age range / gender) on a campaign or ad group
 - `prepare_display_ad_group` — Prepare creation of a paused Display ad group under an existing campaign
 - `prepare_display_campaign_full` — Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting (defaults PL) + ad group + one responsive display ad (using existing uploaded image asset IDs)
@@ -183,6 +185,7 @@ Write preparation — campaigns, budgets, targeting:
 Write preparation — ads & keywords:
 
 - `prepare_ad_status` — Prepare status change (enable/pause) for an existing ad
+- `prepare_ad_update` — Prepare an update to an existing responsive search or responsive display ad (status, final URL, headlines, descriptions)
 - `prepare_clone_entity` — Prepare cloning a supported Google Ads entity as paused
 - `prepare_keyword_status` — Prepare status change (enable/pause/remove) for existing keywords in an ad group
 - `prepare_keywords` — Prepare creation of enabled search keywords in an existing ad group
