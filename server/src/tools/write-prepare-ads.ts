@@ -32,6 +32,7 @@ import {
   loadAdState,
   changeLine,
   textChangeLines,
+  removedResourceError,
 } from './write-helpers.js';
 
 export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void {
@@ -376,6 +377,10 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
       const normalizedAdId = normalizeResourceId(ad_id);
       const state = await loadAdState(cfg, normalizedCustomerId, normalizedAdId);
       if (!state) return validationResult(`Ad ${normalizedAdId} not found on account ${normalizedCustomerId}.`);
+      const removedError = removedResourceError('Ad', String(normalizedAdId), state.status)
+        ?? removedResourceError('Ad group', state.adGroupName, state.adGroupStatus)
+        ?? removedResourceError('Campaign', state.campaignName, state.campaignStatus);
+      if (removedError) return validationResult(removedError);
       const isSearch = state.type === 'RESPONSIVE_SEARCH_AD';
       const isDisplay = state.type === 'RESPONSIVE_DISPLAY_AD';
       const textChanged = headlines !== undefined || descriptions !== undefined;

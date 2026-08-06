@@ -45,6 +45,7 @@ import {
   manualBiddingRequiredWarning,
   enumName,
   sharedBudgetWarning,
+  removedResourceError,
   validateResponsiveDisplayText,
 } from '../src/tools/write-helpers.js';
 import {
@@ -58,6 +59,11 @@ import {
   enumLabel,
   windowClause,
   scaleUnitThresholds,
+  buildDisplayCampaignQuery,
+  buildDisplayAdGroupQuery,
+  buildDisplayAudienceQuery,
+  buildPmaxQuery,
+  buildSearchTermsQuery,
   HYGIENE_DEFAULTS,
   DISPLAY_REMARKETING_DEFAULTS,
   MICROS,
@@ -69,6 +75,7 @@ import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNoti
 import { PLUGIN_VERSION } from '../src/constants.js';
 import { readFileSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
+import { buildAdBlueprint, buildListQuery } from '../src/tools/read-helpers.js';
 
 let passed = 0;
 let failed = 0;
@@ -408,6 +415,18 @@ function testLimitHelpers() {
   assert('a shared budget with one user still says it is a shared resource', soleUser.includes('shared budget resource'));
   assert('an unshared budget with a stale count of 0 stays silent', sharedBudgetWarning(0, false) === null);
 
+  // Editing a removed resource always fails with OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE.
+  // Seen live: prepare_ad_group_update happily minted a token for an ad group whose campaign was
+  // REMOVED, and the batch spent the user's confirmation before the API said no.
+  assert('an enabled resource passes the removed gate', removedResourceError('Campaign', 'Live', 'ENABLED') === null);
+  assert('a paused resource passes the removed gate', removedResourceError('Campaign', 'Off', 'PAUSED') === null);
+  assert('an unreadable status passes the removed gate', removedResourceError('Campaign', 'Unknown', undefined) === null);
+  const removed = removedResourceError('Ad group', 'Dead AG', 'REMOVED') ?? '';
+  assert('a removed resource is refused', removed.includes('is REMOVED'));
+  assert('the refusal names the entity', removed.includes('Ad group "Dead AG"'));
+  assert('the refusal names the API error the user would otherwise hit', removed.includes('OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE'));
+  assert('a raw enum number never reaches the removed gate', (removedResourceError('Campaign', 'Numeric', enumName(enums.CampaignStatus as any, 4)) ?? '').includes('is REMOVED'));
+
   assert('amounts in a change line always keep two decimals', microsChangeLine('Daily budget', 1_000_000, 3_500_000, 'PLN').startsWith('Daily budget: 1.00 PLN → 3.50 PLN'));
   assert('cap messages keep whole numbers readable', (budgetLimitError(9999, resolveAmountLimits(SMOKE_CFG, 'PLN')) ?? '').includes('(500 PLN/day)'));
 
@@ -549,6 +568,99 @@ function testFormat() {
   assert('small floats survive trimming', trimPrecision(0.0000123456789) === 0.0000123457);
 
   assert('an empty repeated field adds no column', !('final_urls' in flattenRow({ ad: { id: 1, final_urls: [] } })));
+
+  // Image assets on a display ad arrive as [{asset: 'customers/1/assets/9'}]. That fell through to
+  // JSON.stringify, so a single ad row carried three columns of quoted resource names.
+  const imageRefs = toTsv([{
+    ad_group_ad: {
+      ad: {
+        id: 7,
+        responsive_display_ad: {
+          marketing_images: [{ asset: 'customers/1/assets/91' }, { asset: 'customers/1/assets/92' }],
+          logo_images: [{ asset: 'customers/1/assets/93' }],
+        },
+      },
+    },
+  }]);
+  assert('tsv shortens asset references to ids', imageRefs.includes('91 ~ 92'));
+  assert('tsv leaves no json in asset columns', !imageRefs.includes('{') && !imageRefs.includes('customers/1/assets'));
+  assert('a single asset reference is shortened too', imageRefs.split('\n')[1].endsWith('93'));
+
+  // get_ad_blueprint returns a semantic JSON structure, so the flat-column decoder never saw it:
+  // live output carried status: 3, asset_performance_label: 2 and approval_status: 4.
+  const blueprint = buildAdBlueprint({
+    campaign: { id: 1, name: 'C', status: 3, advertising_channel_type: 2, advertising_channel_sub_type: 3 },
+    ad_group: { id: 2, name: 'AG', status: 2, type: 2 },
+    ad_group_ad: {
+      resource_name: 'customers/1/adGroupAds/2~3',
+      status: 3,
+      ad: {
+        id: 3,
+        type: 15,
+        final_urls: ['https://a.example'],
+        responsive_search_ad: {
+          headlines: [{ text: 'One', pinned_field: 2, asset_performance_label: 2, policy_summary_info: { approval_status: 4, review_status: 3 } }],
+          descriptions: [{ text: 'Desc' }],
+        },
+      },
+    },
+  }, [
+    { ad_group_ad_asset_view: { resource_name: 'customers/1/adGroupAdAssetViews/2~3~HEADLINE~4', field_type: 2, enabled: true }, asset: { id: 4, name: 'A', type: 5, text_asset: { text: 'One' } } },
+  ]) as any;
+  assert('blueprint decodes campaign status', blueprint.campaign.status === 'PAUSED');
+  assert('blueprint decodes channel type', blueprint.campaign.advertising_channel_type === 'SEARCH');
+  assert('blueprint decodes ad group status and type', blueprint.ad_group.status === 'ENABLED' && blueprint.ad_group.type === 'SEARCH_STANDARD');
+  assert('blueprint decodes ad status', blueprint.ad_group_ad.status === 'PAUSED');
+  assert('blueprint decodes ad type', blueprint.ad.type === 'RESPONSIVE_SEARCH_AD');
+  const headline = blueprint.ad.responsive_search_ad.headlines[0];
+  assert('blueprint decodes asset performance label', headline.asset_performance_label === 'PENDING');
+  assert('blueprint decodes policy approval status', headline.policy_summary_info.approval_status === 'APPROVED');
+  assert('blueprint decodes policy review status', headline.policy_summary_info.review_status === 'REVIEWED');
+  assert('blueprint decodes the pinned field', headline.pinned_field === 'HEADLINE_1');
+  assert('blueprint keeps headline text intact', headline.text === 'One');
+  assert('blueprint groups assets by decoded field type', blueprint.assets_by_field.HEADLINE?.[0].type === 'TEXT', Object.keys(blueprint.assets_by_field).join(','));
+  assert('blueprint leaves the clone input untouched', blueprint.clone_input.tool === 'prepare_responsive_search_ad');
+  assert('blueprint keeps the type hint', blueprint.ad.type_hint === 'RESPONSIVE_SEARCH_AD');
+
+  // The resource name ends in the asset id, not the field type, so parsing its last segment
+  // grouped every asset under its own numeric key. field_type is the only correct source.
+  const numericField = buildAdBlueprint({ ad_group: { id: 2 }, ad_group_ad: { resource_name: 'x', status: 2, ad: { id: 3, type: 15 } } }, [
+    { ad_group_ad_asset_view: { resource_name: 'customers/1/adGroupAdAssetViews/2~3~3~5', field_type: 3, enabled: true }, asset: { id: 5, type: 5 } },
+    { ad_group_ad_asset_view: { resource_name: 'customers/1/adGroupAdAssetViews/2~3~3~6', field_type: 3, enabled: true }, asset: { id: 6, type: 5 } },
+  ]) as any;
+  const groups = Object.keys(numericField.assets_by_field);
+  assert('an asset field type never appears as a bare number', groups.length === 1 && groups[0] === 'DESCRIPTION', groups.join(','));
+  assert('assets sharing a field type land in one group', numericField.assets_by_field.DESCRIPTION.length === 2);
+}
+
+function testEntityQueries() {
+  console.log('\n--- list_ads_entities queries ---');
+
+  // Listing keywords needed hand-written GAQL because the entity enum had no keywords member.
+  const keywords = buildListQuery({ entity: 'keywords', ad_group_id: '55', status: 'ENABLED', type: 'EXACT', name_contains: "o'brien" });
+  assert('keywords query reads ad_group_criterion', keywords.includes('FROM ad_group_criterion'));
+  assert('keywords query excludes negatives', keywords.includes('ad_group_criterion.negative = false'));
+  assert('keywords query restricts to keyword criteria', keywords.includes("ad_group_criterion.type = 'KEYWORD'"));
+  assert('keywords query filters by ad group', keywords.includes('ad_group.id = 55'));
+  assert('keywords query filters by match type', keywords.includes("ad_group_criterion.keyword.match_type = 'EXACT'"));
+  assert('keywords query escapes a quote in the text filter', keywords.includes("o\\'brien"));
+  assert('keywords query returns bids for review loops', keywords.includes('ad_group_criterion.cpc_bid_micros'));
+
+  const campaignNegatives = buildListQuery({ entity: 'negative_keywords', campaign_id: '77' });
+  assert('campaign negatives read campaign_criterion', campaignNegatives.includes('FROM campaign_criterion'));
+  assert('campaign negatives select only negatives', campaignNegatives.includes('campaign_criterion.negative = true'));
+  assert('campaign negatives filter by campaign', campaignNegatives.includes('campaign.id = 77'));
+
+  const adGroupNegatives = buildListQuery({ entity: 'negative_keywords', ad_group_id: '55' });
+  assert('an ad group id switches negatives to the ad group level', adGroupNegatives.includes('FROM ad_group_criterion'));
+  assert('ad group negatives select only negatives', adGroupNegatives.includes('ad_group_criterion.negative = true'));
+
+  for (const entity of ['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links'] as const) {
+    const query = buildListQuery({ entity });
+    assert(`${entity} query is generated`, typeof query === 'string' && query.includes('SELECT'));
+    assert(`${entity} query has no OR`, !query.includes(' OR '));
+    assert(`${entity} query has no dangling WHERE`, !/WHERE\s*ORDER/.test(query) && !/WHERE\s*LIMIT/.test(query));
+  }
 }
 
 function testPagination() {
@@ -678,6 +790,47 @@ function testDisplayRemarketing() {
   assert('display: numeric AdGroupStatus decoded as PAUSED', numericCodes.includes('ad_group_paused_in_enabled_campaign'));
   assert('display: numeric MANUAL_CPC decoded, low bid flagged', numericCodes.includes('manual_cpc_below_floor'));
   assert('display: numeric MANUAL_CPC produces no bids-are-ignored note', !numericCodes.includes('bids_not_the_constraint'));
+
+  // A paused campaign cannot serve, and no bid or audience change alters that. The report has to
+  // say so instead of going quiet, and must not propose a bid raise on something that is off.
+  const paused = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 7, name: 'Paused RMKT', status: 'PAUSED', serving_status: 'SERVING', bidding_strategy_type: 'MANUAL_CPC' }, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } }],
+    adGroups: [{ campaign: { id: 7 }, ad_group: { id: 71, name: 'AG', status: 'ENABLED', cpc_bid_micros: 50_000 } }],
+    audiences: [{ campaign: { id: 7 }, ad_group: { id: 71 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/4' } } }],
+    userLists: [list(4, 40, true)],
+  }, 30);
+  const pausedCodes = paused.findings.map((f) => f.code);
+  assert('display: paused campaign is reported, not ignored', pausedCodes.includes('campaign_paused'));
+  assert('display: paused campaign points at prepare_campaign_status', paused.findings.find((f) => f.code === 'campaign_paused')?.prepare_actions.includes('prepare_campaign_status') === true);
+  assert('display: no bid raise proposed on a paused campaign', !pausedCodes.includes('manual_cpc_below_floor'));
+  assert('display: no zero-impression alarm on a paused campaign', !pausedCodes.includes('zero_impressions'));
+
+  const pausedNumeric = analyzeDisplayRemarketing({
+    campaigns: [{ campaign: { id: 8, name: 'Paused numeric', status: 3, serving_status: 5, bidding_strategy_type: 3 } as any, campaign_budget: { amount_micros: m(30) }, metrics: { impressions: 0 } }],
+    adGroups: [{ campaign: { id: 8 }, ad_group: { id: 81, name: 'AG', status: 2, cpc_bid_micros: 50_000 } as any }],
+    audiences: [{ campaign: { id: 8 }, ad_group: { id: 81 }, ad_group_criterion: { status: 'ENABLED', user_list: { user_list: 'customers/1/userLists/4' } } }],
+    userLists: [list(4, 5000, true)],
+  }, 30);
+  const pausedNumericCodes = pausedNumeric.findings.map((f) => f.code);
+  assert('display: numeric PAUSED campaign status decoded', pausedNumericCodes.includes('campaign_paused'));
+  assert('display: numeric PAUSED campaign gets no bid finding', !pausedNumericCodes.includes('manual_cpc_below_floor'));
+
+  // Removed entities are never action candidates: the API rejects every edit to them, so an
+  // analyzer that proposes prepare_* actions must not see them at all.
+  const actionQueries: Array<[string, string]> = [
+    ['display campaigns', buildDisplayCampaignQuery("segments.date DURING LAST_30_DAYS")],
+    ['display ad groups', buildDisplayAdGroupQuery()],
+    ['display audiences', buildDisplayAudienceQuery()],
+    ['pmax asset groups', buildPmaxQuery("segments.date DURING LAST_30_DAYS")],
+    ['search terms', buildSearchTermsQuery("segments.date DURING LAST_30_DAYS")],
+  ];
+  for (const [label, query] of actionQueries) {
+    assert(`${label} query excludes REMOVED`, /status\s*!=\s*'REMOVED'/.test(query), query);
+  }
+  assert('pmax query excludes removed asset groups too', /asset_group\.status\s*!=\s*'REMOVED'/.test(buildPmaxQuery('x')));
+  for (const [label, query] of actionQueries) {
+    assert(`${label} query has no OR`, !query.includes(' OR '), query);
+  }
 
   // The same list attached to several campaigns must yield one finding, not one per campaign.
   const sharedList = analyzeDisplayRemarketing({
@@ -864,6 +1017,7 @@ async function main() {
   await testAuthFlow();
   testAnalysis();
   testFormat();
+  testEntityQueries();
   testPagination();
   testProfiles();
   testDisplayRemarketing();

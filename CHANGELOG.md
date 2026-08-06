@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.21.1
+
+The follow-up hardens account reads and mutation previews against live Google Ads states that the
+first 0.21 release did not model correctly.
+
+### Added
+- **`list_entities` can read keywords and negative keywords**, with campaign/ad-group scoping,
+  match-type and text filters, and the same bounded pagination as the other entity types.
+- **Analysis excludes removed campaigns and assets** and reports paused Display campaigns as an
+  informational `campaign_paused` finding instead of producing misleading delivery or bid alerts.
+
+### Fixed
+- **Enum values are decoded throughout structured ad blueprints and flat TSV output**, including
+  policy statuses, pinned fields, asset performance labels, and asset references.
+- **Updates to removed campaigns, ad groups, and ads are rejected during preparation** with the
+  API's `OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE` reason, before a confirmation token is
+  minted.
+
 ## v0.21.0
 
 The plugin shipped with Poland baked into it. Two constants, `GEO_POLAND = '2616'` and

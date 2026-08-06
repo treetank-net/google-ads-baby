@@ -41,6 +41,7 @@ import {
   microsChangeLine,
   manualBiddingRequiredWarning,
   sharedBudgetWarning,
+  removedResourceError,
   loadAdGroupState,
   loadBudgetState,
   loadCampaignState,
@@ -186,6 +187,8 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       const normalizedCampaignId = normalizeResourceId(campaign_id);
       const state = await loadCampaignState(cfg, normalizedCustomerId, normalizedCampaignId);
       if (!state) return validationResult(`Campaign ${normalizedCampaignId} not found on account ${normalizedCustomerId}.`);
+      const removedError = removedResourceError('Campaign', state.name, state.status);
+      if (removedError) return validationResult(removedError);
       if (daily_budget_amount !== undefined && !state.budgetId) {
         return validationResult(`Campaign ${normalizedCampaignId} has no readable budget resource; use prepare_budget_change with an explicit budget_id.`);
       }
@@ -655,6 +658,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       const normalizedAdGroupId = normalizeResourceId(ad_group_id);
       const state = await loadAdGroupState(cfg, normalizedCustomerId, normalizedAdGroupId);
       if (!state) return validationResult(`Ad group ${normalizedAdGroupId} not found on account ${normalizedCustomerId}.`);
+      const removedError = removedResourceError('Ad group', state.name, state.status)
+        ?? removedResourceError('Campaign', state.campaignName, state.campaignStatus);
+      if (removedError) return validationResult(removedError);
       const cpcMicros = cpc_bid_amount === undefined ? undefined : amountToMicros(cpc_bid_amount);
       const lines = [
         `Update ad group ${normalizedAdGroupId} "${state.name}" in campaign "${state.campaignName}" (${state.campaignId}), account ${normalizedCustomerId}`,

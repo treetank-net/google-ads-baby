@@ -122,6 +122,12 @@ export function manualBiddingRequiredWarning(biddingStrategyType: string | undef
   return `Warning: campaign bidding strategy is ${biddingStrategyType}. Google ignores ad group CPC bids unless the campaign bids on clicks (${[...CPC_BID_HONORING_STRATEGIES].join(', ')}), so this bid change will not affect delivery.`;
 }
 
+export function removedResourceError(label: string, name: string, status: string | undefined): string | null {
+  if (status !== 'REMOVED') return null;
+  const described = name ? `${label} "${name}"` : label;
+  return `${described} is REMOVED. Google Ads rejects every edit to a removed resource (OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE) and removal is permanent, so this change cannot succeed. Recreate the entity instead, or pick a different one.`;
+}
+
 export function sharedBudgetWarning(referenceCount: number | undefined, explicitlyShared: boolean | undefined): string | null {
   const count = referenceCount ?? 0;
   if (count > 1) {
@@ -178,9 +184,11 @@ export function buildCloneAdQuery(filter: string) {
     SELECT
       campaign.id,
       campaign.name,
+      campaign.status,
       campaign.advertising_channel_type,
       ad_group.id,
       ad_group.name,
+      ad_group.status,
       ad_group_ad.resource_name,
       ad_group_ad.status,
       ad_group_ad.ad.id,
@@ -364,6 +372,7 @@ export interface AdGroupState {
   type: string;
   campaignId: string;
   campaignName: string;
+  campaignStatus: string;
   biddingStrategyType?: string;
 }
 
@@ -377,6 +386,7 @@ export async function loadAdGroupState(cfg: AdsConfig, customerId: string, adGro
       ad_group.type,
       campaign.id,
       campaign.name,
+      campaign.status,
       campaign.bidding_strategy_type
     FROM ad_group
     WHERE ad_group.id = ${normalizeResourceId(adGroupId)}
@@ -392,6 +402,7 @@ export async function loadAdGroupState(cfg: AdsConfig, customerId: string, adGro
     type: enumName(enums.AdGroupType as EnumTable, row.ad_group?.type),
     campaignId: String(row.campaign?.id ?? ''),
     campaignName: String(row.campaign?.name ?? ''),
+    campaignStatus: enumName(enums.CampaignStatus as EnumTable, row.campaign?.status),
     biddingStrategyType: row.campaign?.bidding_strategy_type === undefined
       ? undefined
       : enumName(enums.BiddingStrategyType as EnumTable, row.campaign.bidding_strategy_type),
@@ -497,6 +508,9 @@ export interface AdState {
   adId: string;
   adGroupId: string;
   adGroupName: string;
+  adGroupStatus: string;
+  campaignName: string;
+  campaignStatus: string;
   status: string;
   type: string;
   finalUrls: string[];
@@ -515,6 +529,9 @@ export async function loadAdState(cfg: AdsConfig, customerId: string, adId: stri
     adId: String(ad.id ?? adId),
     adGroupId: String(row.ad_group?.id ?? ''),
     adGroupName: String(row.ad_group?.name ?? ''),
+    adGroupStatus: enumName(enums.AdGroupStatus as EnumTable, row.ad_group?.status),
+    campaignName: String(row.campaign?.name ?? ''),
+    campaignStatus: enumName(enums.CampaignStatus as EnumTable, row.campaign?.status),
     status: enumName(enums.AdGroupAdStatus as EnumTable, row.ad_group_ad?.status),
     type: enumName(enums.AdType as EnumTable, ad.type),
     finalUrls: (ad.final_urls ?? []) as string[],

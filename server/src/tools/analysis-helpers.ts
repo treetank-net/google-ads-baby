@@ -151,6 +151,7 @@ export function buildSearchTermsQuery(clause: string): string {
       metrics.cost_micros, metrics.conversions, metrics.clicks
     FROM search_term_view
     WHERE ${clause}
+      AND campaign.status != 'REMOVED'
     ORDER BY metrics.cost_micros DESC
   `;
 }
@@ -164,6 +165,8 @@ export function buildPmaxQuery(clause: string): string {
     FROM asset_group
     WHERE ${clause}
       AND campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+      AND campaign.status != 'REMOVED'
+      AND asset_group.status != 'REMOVED'
     ORDER BY metrics.cost_micros DESC
   `;
 }
@@ -484,6 +487,7 @@ export function buildDisplayCampaignQuery(clause: string): string {
     FROM campaign
     WHERE ${clause}
       AND campaign.advertising_channel_type = 'DISPLAY'
+      AND campaign.status != 'REMOVED'
   `;
 }
 
@@ -494,6 +498,7 @@ export function buildDisplayAdGroupQuery(): string {
       ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros
     FROM ad_group
     WHERE campaign.advertising_channel_type = 'DISPLAY'
+      AND campaign.status != 'REMOVED'
       AND ad_group.status != 'REMOVED'
   `;
 }
@@ -600,6 +605,18 @@ export function analyzeDisplayRemarketing(
     const dailyBudget = toUnits(row.campaign_budget?.amount_micros);
     const campaignAudiences = audiencesByCampaign.get(campaignId) ?? [];
 
+    if (status === 'PAUSED') {
+      findings.push({
+        code: 'campaign_paused',
+        severity: 'info',
+        entity,
+        observation: 'Campaign is PAUSED, so nothing in it can serve regardless of audiences, bids or budget. Every other delivery check below is skipped for this campaign — enable it first if delivery is what you are diagnosing.',
+        metrics: { impressions, daily_budget: dailyBudget, campaign_id: campaignId },
+        suggested_task: displayTask(`Decide status of paused Display campaign: ${name}`, 'Display campaign is paused, so its delivery cannot be diagnosed.', `campaign_id=${campaignId}`),
+        prepare_actions: ['prepare_campaign_status'],
+      });
+    }
+
     if (status === 'ENABLED' && servingStatus && !SERVING_STATUSES_OK.has(servingStatus)) {
       findings.push({
         code: 'campaign_not_serving',
@@ -670,7 +687,7 @@ export function analyzeDisplayRemarketing(
         });
       }
 
-      if (strategy === 'MANUAL_CPC' && cpc > 0 && cpc <= t.lowCpcUnits) {
+      if (status === 'ENABLED' && strategy === 'MANUAL_CPC' && cpc > 0 && cpc <= t.lowCpcUnits) {
         findings.push({
           code: 'manual_cpc_below_floor',
           severity: 'warning',

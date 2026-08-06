@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { normalizeResourceId } from '../validation.js';
+import { decodeCell, decodeEnumsDeep } from './format.js';
 
-export const entitySchema = z.enum(['campaigns', 'ad_groups', 'ads', 'assets', 'ad_asset_links']);
+export const entitySchema = z.enum(['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links']);
 export const upperTokenSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'Use a Google Ads enum value, e.g. ENABLED, PAUSED, SEARCH, RESPONSIVE_DISPLAY_AD');
 
 export type AdBlueprintInput = {
@@ -46,11 +47,6 @@ function assetIdFromResourceName(resourceName: string | undefined): string | nul
   return match ? match[1] : null;
 }
 
-function fieldNameFromAssetViewResourceName(resourceName: string | undefined): string | null {
-  const match = resourceName?.match(/~([^~]+)$/);
-  return match ? match[1] : null;
-}
-
 function textValues(items: Array<{ text?: string }> | undefined): string[] {
   return (items ?? []).map((item) => item.text).filter((value): value is string => Boolean(value));
 }
@@ -71,12 +67,12 @@ export function buildAdBlueprint(adRow: any, assetRows: any[]) {
   const assetsByField = assetRows.reduce<Record<string, unknown[]>>((grouped, row) => {
     const view = row.ad_group_ad_asset_view ?? {};
     const asset = row.asset ?? {};
-    const field = fieldNameFromAssetViewResourceName(view.resource_name) ?? String(view.field_type ?? 'UNKNOWN');
+    const field = String(decodeCell('ad_group_ad_asset_view.field_type', view.field_type) ?? 'UNKNOWN');
     grouped[field] = grouped[field] ?? [];
     grouped[field].push({
       id: asset.id,
       name: asset.name,
-      type: asset.type,
+      type: decodeCell('asset.type', asset.type),
       resource_name: asset.resource_name,
       text: asset.text_asset?.text,
       image: asset.image_asset ? {
@@ -108,7 +104,7 @@ export function buildAdBlueprint(adRow: any, assetRows: any[]) {
     final_url: ad.final_urls?.[0],
   } : undefined;
 
-  return {
+  return decodeEnumsDeep({
     campaign: adRow.campaign,
     ad_group: adRow.ad_group,
     ad_group_ad: {
@@ -126,7 +122,7 @@ export function buildAdBlueprint(adRow: any, assetRows: any[]) {
     },
     assets_by_field: assetsByField,
     clone_input: cloneInput,
-  };
+  });
 }
 
 export function buildAdQuery(filter: string) {
@@ -295,6 +291,77 @@ export function buildListQuery(input: {
         FROM ad_group_ad
         ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
         ORDER BY campaign.name, ad_group.name, ad_group_ad.ad.id
+        LIMIT ${limit}
+      `;
+
+    case 'keywords':
+      addCommonFilters(filters, input, {
+        status: 'ad_group_criterion.status',
+        type: 'ad_group_criterion.keyword.match_type',
+      });
+      if (input.name_contains) filters.push(`ad_group_criterion.keyword.text LIKE '%${gaqlString(input.name_contains)}%'`);
+      filters.push('ad_group_criterion.type = \'KEYWORD\'');
+      filters.push('ad_group_criterion.negative = false');
+      return `
+        SELECT
+          campaign.id,
+          campaign.name,
+          campaign.status,
+          ad_group.id,
+          ad_group.name,
+          ad_group.status,
+          ad_group_criterion.criterion_id,
+          ad_group_criterion.status,
+          ad_group_criterion.keyword.text,
+          ad_group_criterion.keyword.match_type,
+          ad_group_criterion.cpc_bid_micros,
+          ad_group_criterion.effective_cpc_bid_micros
+        FROM ad_group_criterion
+        WHERE ${filters.join(' AND ')}
+        ORDER BY campaign.name, ad_group.name, ad_group_criterion.keyword.text
+        LIMIT ${limit}
+      `;
+
+    case 'negative_keywords':
+      if (input.ad_group_id) {
+        filters.push(`ad_group.id = ${normalizeResourceId(input.ad_group_id)}`);
+        if (input.campaign_id) filters.push(`campaign.id = ${normalizeResourceId(input.campaign_id)}`);
+        if (input.type) filters.push(`ad_group_criterion.keyword.match_type = '${input.type}'`);
+        if (input.name_contains) filters.push(`ad_group_criterion.keyword.text LIKE '%${gaqlString(input.name_contains)}%'`);
+        filters.push('ad_group_criterion.type = \'KEYWORD\'');
+        filters.push('ad_group_criterion.negative = true');
+        return `
+          SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            ad_group_criterion.criterion_id,
+            ad_group_criterion.keyword.text,
+            ad_group_criterion.keyword.match_type
+          FROM ad_group_criterion
+          WHERE ${filters.join(' AND ')}
+          ORDER BY campaign.name, ad_group.name, ad_group_criterion.keyword.text
+          LIMIT ${limit}
+        `;
+      }
+      if (input.campaign_id) filters.push(`campaign.id = ${normalizeResourceId(input.campaign_id)}`);
+      if (input.type) filters.push(`campaign_criterion.keyword.match_type = '${input.type}'`);
+      if (input.name_contains) filters.push(`campaign_criterion.keyword.text LIKE '%${gaqlString(input.name_contains)}%'`);
+      filters.push('campaign_criterion.type = \'KEYWORD\'');
+      filters.push('campaign_criterion.negative = true');
+      return `
+        SELECT
+          campaign.id,
+          campaign.name,
+          campaign.status,
+          campaign_criterion.criterion_id,
+          campaign_criterion.status,
+          campaign_criterion.keyword.text,
+          campaign_criterion.keyword.match_type
+        FROM campaign_criterion
+        WHERE ${filters.join(' AND ')}
+        ORDER BY campaign.name, campaign_criterion.keyword.text
         LIMIT ${limit}
       `;
 
