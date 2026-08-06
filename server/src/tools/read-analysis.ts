@@ -11,9 +11,8 @@ import {
   analyzeScalingCandidates,
   analyzeSearchTermsWaste,
   analyzeDisplayRemarketing,
-  trimAudienceCoverage,
-  capFindings,
-  omittedFindingsNote,
+  rankAudienceCoverage,
+  sortFindings,
   buildHygieneQuery,
   buildPmaxQuery,
   buildScalingQuery,
@@ -34,15 +33,19 @@ import {
   type DisplayAudienceRow,
   type UserListRow,
 } from './analysis-helpers.js';
-import { toTsv } from './format.js';
+import { pageSchema, pageCharsSchema } from './read-helpers.js';
+import { toTsv, paginate, pageNote } from './format.js';
 
-function report(name: string, customerId: string, extra: Record<string, unknown>) {
+const renderFindings = (rows: Finding[]) => JSON.stringify(rows, null, 2);
+
+function report(name: string, customerId: string, extra: Record<string, unknown>, page?: number, pageChars?: number) {
   const body: Record<string, unknown> = { report: name, customer_id: customerId, ...extra };
   if (Array.isArray(body.findings)) {
-    const capped = capFindings(body.findings as Finding[]);
-    body.findings = capped.findings;
-    const note = omittedFindingsNote(capped.omitted);
-    if (note) body.findings_note = note;
+    const ranked = sortFindings(body.findings as Finding[]);
+    const slice = paginate(ranked, page ?? 1, pageChars, renderFindings);
+    body.findings = slice.rows;
+    const note = pageNote(slice, 'findings');
+    if (note) body.findings_note = `${note} Findings are ordered most severe first, so page 1 carries the criticals. Counts in "summary" cover every finding, not just this page.`;
   }
   return { content: [{ type: 'text' as const, text: JSON.stringify(body, null, 2) }] };
 }
@@ -60,8 +63,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, days }) => {
+    async ({ customer_id, days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
@@ -75,7 +80,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           summary: summarize(findings),
           findings,
           follow_up: followUp,
-        });
+        }, page, page_chars);
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -91,8 +96,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, days }) => {
+    async ({ customer_id, days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
@@ -106,7 +113,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           summary: summarize(findings),
           findings,
           follow_up: followUp,
-        });
+        }, page, page_chars);
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -123,8 +130,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
       customer_id: z.string().describe('Google Ads customer ID'),
       recent_days: z.enum(['14', '30']).default('30').describe('Recent window for the 0-conversion test'),
       cross_check_days: z.enum(['60', '90']).default('90').describe('Longer window for the bounce-back cross-check'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, recent_days, cross_check_days }) => {
+    async ({ customer_id, recent_days, cross_check_days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
@@ -144,7 +153,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           summary: summarize(findings),
           findings,
           follow_up: followUp,
-        });
+        }, page, page_chars);
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -161,8 +170,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, days }) => {
+    async ({ customer_id, days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
@@ -184,21 +195,23 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           fetchOptional<UserListRow>('user lists', buildUserListQuery()),
         ]);
         const { findings, audience_coverage } = analyzeDisplayRemarketing({ campaigns, adGroups, audiences, userLists }, windowDays);
-        const trimmed = trimAudienceCoverage(audience_coverage);
+        const ranked = rankAudienceCoverage(audience_coverage);
+        const coveragePage = paginate(ranked, page ?? 1, page_chars);
+        const coverageNote = pageNote(coveragePage, 'user lists');
         return report('display_remarketing_diagnostics', cid, {
           window_days: windowDays,
           campaigns_scanned: campaigns.length,
           ad_groups_scanned: adGroups.length,
           user_lists_attached: audience_coverage.length,
-          audience_coverage_tsv: toTsv(trimmed.coverage),
-          ...(trimmed.omitted
-            ? { audience_coverage_note: `Showing the ${trimmed.coverage.length} lists most used by enabled campaigns; ${trimmed.omitted} further list(s) omitted from this table. All of them are still covered by findings.` }
+          audience_coverage_tsv: toTsv(coveragePage.rows),
+          ...(coverageNote
+            ? { audience_coverage_note: `${coverageNote} Lists are ordered by how many enabled campaigns use them.` }
             : {}),
           summary: summarize(findings),
           findings,
           not_checked: notChecked,
           follow_up: followUp,
-        });
+        }, page, page_chars);
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -214,8 +227,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID'),
       days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, days }) => {
+    async ({ customer_id, days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
       try {
@@ -230,7 +245,7 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
           summary: summarize(findings),
           findings,
           follow_up: followUp,
-        });
+        }, page, page_chars);
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }

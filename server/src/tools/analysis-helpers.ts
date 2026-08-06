@@ -531,15 +531,8 @@ export function omittedFindingsNote(omitted: Record<Severity, number>): string |
   return `Findings are capped at ${FINDINGS_LIMIT}, most severe first; ${parts.join(', ')} finding(s) are not listed. Counts in "summary" cover all of them. Narrow the window or fix the listed items and re-run to see the rest.`;
 }
 
-export const AUDIENCE_COVERAGE_LIMIT = 40;
-
-export function trimAudienceCoverage(
-  coverage: Array<Record<string, unknown>>,
-  limit = AUDIENCE_COVERAGE_LIMIT,
-): { coverage: Array<Record<string, unknown>>; omitted: number } {
-  if (coverage.length <= limit) return { coverage, omitted: 0 };
-  const ranked = [...coverage].sort((a, b) => Number(b.enabled_campaigns ?? 0) - Number(a.enabled_campaigns ?? 0));
-  return { coverage: ranked.slice(0, limit), omitted: coverage.length - limit };
+export function rankAudienceCoverage(coverage: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return [...coverage].sort((a, b) => Number(b.enabled_campaigns ?? 0) - Number(a.enabled_campaigns ?? 0));
 }
 
 function displayTask(title: string, reason: string, context: string): SuggestedTask {

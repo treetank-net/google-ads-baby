@@ -31,15 +31,14 @@ import {
   analyzeSearchTermsWaste,
   analyzePmaxBreakdown,
   analyzeDisplayRemarketing,
-  trimAudienceCoverage,
-  capFindings,
-  omittedFindingsNote,
+  rankAudienceCoverage,
+  sortFindings,
   enumLabel,
   windowClause,
   MICROS,
 } from '../src/tools/analysis-helpers.js';
 import { enums } from 'google-ads-api';
-import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision } from '../src/tools/format.js';
+import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
 
 let passed = 0;
 let failed = 0;
@@ -360,6 +359,49 @@ function testFormat() {
   assert('integers keep every digit', trimPrecision(624362494) === 624362494);
   assert('micros are never rounded', toTsv([{ metrics: { cost_micros: 624362494, ctr: 0.024426496464442234 } }]).split('\n')[1] === '624362494\t0.0244265');
   assert('small floats survive trimming', trimPrecision(0.0000123456789) === 0.0000123457);
+
+  assert('an empty repeated field adds no column', !('final_urls' in flattenRow({ ad: { id: 1, final_urls: [] } })));
+}
+
+function testPagination() {
+  console.log('\n--- Pagination by response size ---');
+
+  const small = Array.from({ length: 5 }, (_, i) => ({ campaign: { id: i, name: 'x' } }));
+  const onePage = paginate(small, 1);
+  assert('a small result is one page', onePage.pages === 1 && onePage.rows.length === 5);
+  assert('one page emits no note', pageNote(onePage, 'campaigns') === undefined);
+
+  const wide = Array.from({ length: 400 }, (_, i) => ({ ad_group_ad: { ad: { id: i, name: 'y'.repeat(500) } } }));
+  const p1 = paginate(wide, 1);
+  assert('an oversized result splits into several pages', p1.pages > 2, `pages=${p1.pages}`);
+  assert('a page fits the character budget', toTsv(p1.rows).length <= DEFAULT_PAGE_CHARS, `chars=${toTsv(p1.rows).length}`);
+  assert('total counts every row, not the page', p1.total === 400);
+
+  const p2 = paginate(wide, 2);
+  assert('the next page continues where the last ended', p2.from === p1.to + 1);
+
+  const last = paginate(wide, p1.pages);
+  assert('the last page ends on the last row', last.to === 400);
+  assert('a page past the end clamps to the last one', paginate(wide, 999).page === p1.pages);
+  assert('page 0 clamps to the first page', paginate(wide, 0).page === 1);
+
+  const seen = new Set<number>();
+  for (let i = 1; i <= p1.pages; i++) {
+    for (const row of paginate(wide, i).rows) seen.add((row as any).ad_group_ad.ad.id);
+  }
+  assert('no row is lost or duplicated across pages', seen.size === 400);
+
+  const note = pageNote(p1, 'ads');
+  assert('the note says which page of how many', !!note && note.includes(`of ${p1.pages}`) && note.includes('of 400'));
+  assert('the note tells the caller how to continue', !!note && note.includes('page: 2'));
+  assert('the last page says it is last', String(pageNote(last, 'ads')).includes('last page'));
+
+  assert('a tighter budget yields more pages', paginate(wide, 1, 8_000).pages > p1.pages);
+  assert('narrow rows need fewer pages than wide ones', paginate(Array.from({ length: 400 }, (_, i) => ({ campaign: { id: i } })), 1).pages < p1.pages);
+  assert('an empty result is a single empty page', paginate([], 1).pages === 1 && paginate([], 1).total === 0);
+
+  const asJson = paginate(Array.from({ length: 200 }, (_, i) => ({ code: 'x', entity: `e${i}`, blob: 'z'.repeat(300) })), 1, 10_000, (rows) => JSON.stringify(rows, null, 2));
+  assert('pagination honours a non-TSV renderer', JSON.stringify(asJson.rows, null, 2).length <= 10_000 && asJson.pages > 1);
 }
 
 function displayTaskStub() {
@@ -489,22 +531,25 @@ function testDisplayRemarketing() {
   assert('display: unsized Display list reported as info', unreported.findings.find((f) => f.code === 'display_size_not_reported')?.severity === 'info');
 
   const coverage = Array.from({ length: 45 }, (_, index) => ({ user_list: `l${index}`, enabled_campaigns: index }));
-  const trimmedCoverage = trimAudienceCoverage(coverage, 40);
-  assert('display: coverage table capped', trimmedCoverage.coverage.length === 40);
-  assert('display: cap reports how many rows were dropped', trimmedCoverage.omitted === 5);
-  assert('display: capped table keeps the live lists', trimmedCoverage.coverage.every((row) => Number(row.enabled_campaigns) >= 5));
-  assert('display: small coverage table untouched', trimAudienceCoverage(coverage.slice(0, 3), 40).omitted === 0);
+  const rankedCoverage = rankAudienceCoverage(coverage);
+  assert('display: coverage keeps every list (nothing dropped)', rankedCoverage.length === 45);
+  assert('display: coverage is ordered by enabled campaigns', Number(rankedCoverage[0].enabled_campaigns) === 44);
+  assert('display: ranking does not mutate the input', Number(coverage[0].enabled_campaigns) === 0);
 
   const many = [
     ...Array.from({ length: 4 }, (_, i) => ({ code: 'c', severity: 'critical' as const, entity: `c${i}`, observation: '', metrics: {}, suggested_task: displayTaskStub(), prepare_actions: [] })),
     ...Array.from({ length: 30 }, (_, i) => ({ code: 'i', severity: 'info' as const, entity: `i${i}`, observation: '', metrics: {}, suggested_task: displayTaskStub(), prepare_actions: [] })),
   ];
-  const cappedFindings = capFindings(many, 25);
-  assert('findings capped at the limit', cappedFindings.findings.length === 25);
-  assert('cap keeps every critical finding', cappedFindings.findings.filter((f) => f.severity === 'critical').length === 4);
-  assert('cap drops only info findings here', cappedFindings.omitted.info === 9 && cappedFindings.omitted.critical === 0);
-  assert('cap note states what was dropped', (omittedFindingsNote(cappedFindings.omitted) ?? '').includes('9 info'));
-  assert('no note when nothing was dropped', omittedFindingsNote(capFindings(many.slice(0, 5), 25).omitted) === null);
+  const rankedFindings = sortFindings(many);
+  assert('findings are ordered most severe first', rankedFindings.slice(0, 4).every((f) => f.severity === 'critical'));
+  const findingsPage = paginate(rankedFindings, 1, 4_000, (rows) => JSON.stringify(rows, null, 2));
+  assert('findings paginate instead of being capped', findingsPage.pages > 1 && findingsPage.total === 34);
+  assert('page 1 of findings carries the criticals', findingsPage.rows.filter((f) => f.severity === 'critical').length === 4);
+  const seenFindings = new Set<string>();
+  for (let i = 1; i <= findingsPage.pages; i++) {
+    for (const f of paginate(rankedFindings, i, 4_000, (rows) => JSON.stringify(rows, null, 2)).rows) seenFindings.add(f.entity);
+  }
+  assert('every finding is reachable across pages', seenFindings.size === 34);
 
   assert('enumLabel maps a number to its name', enumLabel(enums.CampaignStatus as any, 2) === 'ENABLED');
   assert('enumLabel passes a name through', enumLabel(enums.CampaignStatus as any, 'PAUSED') === 'PAUSED');
@@ -526,6 +571,7 @@ async function main() {
   await testAuthFlow();
   testAnalysis();
   testFormat();
+  testPagination();
   testDisplayRemarketing();
   testLimitHelpers();
   testToolContract();

@@ -4,7 +4,7 @@ import type { AdsConfig } from '../config.js';
 import { listAccounts, executeGaql, getCampaigns } from '../client.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, requireCustomerId } from '../validation.js';
-import { tsvDocument } from './format.js';
+import { tsvDocument, paginate, pageNote } from './format.js';
 import {
   entitySchema,
   upperTokenSchema,
@@ -15,20 +15,27 @@ import {
   buildAdQuery,
   buildAdAssetQuery,
   buildListQuery,
+  pageSchema,
+  pageCharsSchema,
 } from './read-helpers.js';
 
 export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
     'list_accounts',
     'List all Google Ads accounts under the MCC',
-    {},
-    async () => {
+    {
+      page: pageSchema,
+      page_chars: pageCharsSchema,
+    },
+    async ({ page, page_chars }) => {
       if (!cfg.developerToken || !cfg.loginCustomerId) {
         return { content: [{ type: 'text', text: 'Error: Missing developer token or MCC ID. Run setup_google_auth first.' }] };
       }
       try {
         const accounts = await listAccounts(cfg);
-        return { content: [{ type: 'text', text: tsvDocument([['accounts', accounts as unknown[]]]) }] };
+        const slice = paginate(accounts as unknown[], page ?? 1, page_chars);
+        const note = pageNote(slice, 'accounts');
+        return { content: [{ type: 'text', text: tsvDocument([['accounts', slice.rows]], note ? [note] : []) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -41,8 +48,10 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
     {
       customer_id: z.string().describe('Google Ads customer ID (e.g. "1234567890")'),
       days: z.enum(['7', '30']).default('30').describe('Lookback period'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, days }) => {
+    async ({ customer_id, days, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) {
         return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
@@ -50,7 +59,10 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       try {
         const cid = normalizeCustomerId(customer_id);
         const rows = await getCampaigns(cfg, cid, Number(days) as 7 | 30);
-        return { content: [{ type: 'text', text: tsvDocument([['campaigns', rows as unknown[]]], [`# campaigns for customer ${cid}, last ${days}d`]) }] };
+        const slice = paginate(rows as unknown[], page ?? 1, page_chars);
+        const note = pageNote(slice, 'campaigns');
+        const header = [`# campaigns for customer ${cid}, last ${days}d`, ...(note ? [note] : [])];
+        return { content: [{ type: 'text', text: tsvDocument([['campaigns', slice.rows]], header) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -64,8 +76,10 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       customer_id: z.string().describe('Google Ads customer ID'),
       query: z.string().describe('GAQL query (SELECT ... FROM ... WHERE ...)'),
       format: z.enum(['tsv', 'json']).default('tsv').describe('tsv (default) is compact and decodes enum numbers to names; json returns the raw API rows and costs several times more context'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
-    async ({ customer_id, query, format }) => {
+    async ({ customer_id, query, format, page, page_chars }) => {
       const validationError = requireCustomerId(customer_id);
       if (validationError) {
         return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
@@ -78,7 +92,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       try {
         const rows = await executeGaql(cfg, normalizeCustomerId(customer_id), query);
         if (format === 'json') return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
-        return { content: [{ type: 'text', text: tsvDocument([['rows', rows as unknown[]]]) }] };
+        const slice = paginate(rows as unknown[], page ?? 1, page_chars);
+        const note = pageNote(slice, 'rows');
+        return { content: [{ type: 'text', text: tsvDocument([['rows', slice.rows]], note ? [note] : []) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: formatError(err) }] };
       }
@@ -153,7 +169,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       type: upperTokenSchema.optional().describe('Optional entity type filter, e.g. SEARCH, DISPLAY, RESPONSIVE_SEARCH_AD, IMAGE'),
       subtype: upperTokenSchema.optional().describe('Optional campaign advertising channel subtype filter, e.g. DISPLAY_GMAIL_AD, SEARCH_MOBILE_APP'),
       name_contains: z.string().min(1).max(120).optional().describe('Optional case-sensitive name substring filter where the selected entity has a name'),
-      limit: z.number().int().min(1).max(200).default(50).describe('Maximum rows to return, capped at 200'),
+      limit: z.number().int().min(1).max(5000).default(2000).describe('Upper bound on rows fetched from the API (default 2000, max 5000). The response itself is split into pages by size, so this is a fetch bound, not a display bound.'),
+      page: pageSchema,
+      page_chars: pageCharsSchema,
     },
     async (input) => {
       const validationError = requireCustomerId(input.customer_id);
@@ -165,13 +183,19 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
         const rows = await executeGaql(cfg, normalizeCustomerId(input.customer_id), query);
         const limit = normalizeLimit(input.limit);
         const list = rows as unknown[];
-        const truncated = list.length >= limit
-          ? [`Returned ${list.length} row(s) at the limit of ${limit}; there may be more. Narrow with campaign_id / ad_group_id / status / name_contains, or raise limit (max 200).`]
+        const atFetchBound = list.length >= limit
+          ? [`Fetched ${list.length} row(s) at the API bound of ${limit}; the account may hold more. Narrow with campaign_id / ad_group_id / status / name_contains, or raise limit (max 5000).`]
           : [];
+        const slice = paginate(list, input.page ?? 1, input.page_chars);
+        const note = pageNote(slice, input.entity);
         return {
           content: [{
             type: 'text',
-            text: tsvDocument([[input.entity, list]], [`# ${input.entity} for customer ${normalizeCustomerId(input.customer_id)}`, ...truncated]),
+            text: tsvDocument([[input.entity, slice.rows]], [
+              `# ${input.entity} for customer ${normalizeCustomerId(input.customer_id)}`,
+              ...atFetchBound,
+              ...(note ? [note] : []),
+            ]),
           }],
         };
       } catch (err) {

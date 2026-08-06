@@ -94,6 +94,19 @@ jest zawsze fałszywe na żywych danych i **testy syntetyczne go nie wyłapią**
 podaje się nazwy. Nowy test na danych z GAQL musi karmić analizator liczbami
 (patrz `display: numeric ...` w `test/smoke.ts`).
 
+**Nie obcinaj — paginuj:**
+Read tool, który może zwrócić dużo wierszy, **nie** obcina wyniku do stałej liczby. Przepuszcza
+go przez `paginate()` (`tools/format.ts`) i dokłada `pageNote()` do nagłówka. Podział liczy się
+z **realnego rozmiaru wyrenderowanej strony**, nie z liczby wierszy — wiersz `list_ads_entities(ads)`
+kosztuje ~54 tokeny, a `get_ad_creatives` w meta ~160, więc stała liczba wierszy raz przekracza
+budżet, raz go marnuje. `paginate()` przyjmuje renderer (`toTsv` domyślnie, `JSON.stringify` dla
+`findings`), bo strona musi mieścić się w budżecie w formacie, w którym naprawdę wyjdzie.
+Parametr `limit` w `list_ads_entities` to **granica pobrania z API**, nie wyświetlania — nazwa
+i opis muszą to mówić, bo `customer.query()` paginuje wewnętrznie i `LIMIT` w GAQL był naszym
+obcinaniem, nie ograniczeniem Google'a. Sortowanie przed paginacją jest obowiązkowe tam, gdzie
+istnieje ważność (`sortFindings` po severity, `rankAudienceCoverage` po liczbie kampanii) — strona 1
+musi nieść to, co najważniejsze.
+
 **Format odpowiedzi read toolów — TSV, nie JSON:**
 Każdy read tool zwracający **listę wierszy** musi przechodzić przez `tsvDocument()` / `toTsv()`
 (`tools/format.ts`), nie przez `JSON.stringify`. JSON pretty-print powtarza nazwy kluczy raz na

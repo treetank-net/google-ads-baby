@@ -14,9 +14,18 @@ export function gaqlString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+export const DEFAULT_FETCH_LIMIT = 2000;
+export const MAX_FETCH_LIMIT = 5000;
+
 export function normalizeLimit(limit: number | undefined): number {
-  return Math.max(1, Math.min(Math.floor(limit ?? 50), 200));
+  return Math.max(1, Math.min(Math.floor(limit ?? DEFAULT_FETCH_LIMIT), MAX_FETCH_LIMIT));
 }
+
+export const pageSchema = z.number().int().positive().optional()
+  .describe('Page number (default 1). Results are split into pages by response size; the response says how many pages there are.');
+
+export const pageCharsSchema = z.number().int().min(4_000).max(200_000).optional()
+  .describe('Max characters per page (default 40000). Raise it only when you deliberately want a bigger single response.');
 
 export function resourceNameLiteral(value: string): string {
   return `'${gaqlString(value.trim())}'`;

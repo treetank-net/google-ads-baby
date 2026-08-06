@@ -47,6 +47,7 @@ export function flattenRow(value: unknown, prefix = '', out: Record<string, unkn
     return out;
   }
   if (Array.isArray(value)) {
+    if (!value.length) return out;
     const allScalar = value.every((item) => !item || typeof item !== 'object');
     const textObjects = value.length > 0 && value.every((item) => item && typeof item === 'object' && 'text' in (item as object));
     if (allScalar) out[prefix] = value.join(' ~ ');
@@ -83,6 +84,51 @@ export function toTsv(rows: unknown[]): string {
     lines.push(columns.map((column) => escapeCell(trimPrecision(decodeCell(column, shortenResourceName(row[column]))))).join('\t'));
   }
   return lines.join('\n');
+}
+
+export const DEFAULT_PAGE_CHARS = 40_000;
+
+export interface Page<T> {
+  rows: T[];
+  page: number;
+  pages: number;
+  from: number;
+  to: number;
+  total: number;
+}
+
+export type Renderer<T> = (rows: T[]) => string;
+
+function costModel<T>(rows: T[], render: Renderer<T>): { fixed: number; perRow: number } {
+  const all = render(rows).length;
+  if (rows.length < 2) return { fixed: 0, perRow: Math.max(1, all) };
+  const one = render(rows.slice(0, 1)).length;
+  const perRow = Math.max(1, (all - one) / (rows.length - 1));
+  return { fixed: Math.max(0, one - perRow), perRow };
+}
+
+export function paginate<T>(rows: T[], page: number, maxChars = DEFAULT_PAGE_CHARS, render: Renderer<T> = toTsv as Renderer<T>): Page<T> {
+  const total = rows.length;
+  if (!total) return { rows, page: 1, pages: 1, from: 0, to: 0, total: 0 };
+
+  const rendered = render(rows);
+  let perPage = total;
+  if (rendered.length > maxChars) {
+    const { fixed, perRow } = costModel(rows, render);
+    perPage = Math.max(1, Math.floor(Math.max(1, maxChars - fixed) / perRow));
+  }
+
+  const pages = Math.ceil(total / perPage);
+  const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+  const start = (current - 1) * perPage;
+  const slice = rows.slice(start, start + perPage);
+  return { rows: slice, page: current, pages, from: start + 1, to: start + slice.length, total };
+}
+
+export function pageNote<T>(p: Page<T>, what: string): string | undefined {
+  if (p.pages <= 1) return undefined;
+  const more = p.page < p.pages ? ` Call again with page: ${p.page + 1} for the next slice.` : ' This is the last page.';
+  return `Page ${p.page} of ${p.pages} — ${what} ${p.from}-${p.to} of ${p.total}. Split by response size, not by a fixed row count.${more}`;
 }
 
 export function tsvSection(label: string, rows: unknown[]): string {

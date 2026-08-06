@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.18.0
+
+0.17.0 made responses compact but kept the old habit of *truncating* them. Truncation loses
+data; pagination does not. Every read tool that can return many rows now splits its response
+into pages sized by how much the rendered output actually costs.
+
+### Changed
+- **`list_ads_entities`, `list_accounts`, `get_campaigns` and `execute_gaql` are paginated instead of capped.** `page` selects the slice, `page_chars` overrides the ~40 000-character budget, and the response states which page of how many, which rows, and how to ask for the next one. The split follows real rendered size, not a row count: a 500-character-per-row result yields ~70 rows per page while a narrow one yields hundreds.
+- **`list_ads_entities`'s `limit` is now a fetch bound, not a display bound** (default 2000, max 5000, was 50/200). `customer.query()` already pages through the API internally, so the old GAQL `LIMIT 50` was *our* truncation, not Google's — asking for 500 ads and being handed 50 with "there may be more" was the tool discarding rows it had every ability to return.
+- **Analysis findings paginate rather than cap at 25.** Findings stay sorted most-severe-first, so page 1 still carries the criticals, and `summary` still counts all of them — but the tail is now reachable instead of gone. Pagination measures the JSON these reports actually emit, not a TSV stand-in.
+- **The Display audience-coverage table is no longer trimmed to 40 rows.** It is ordered by how many enabled campaigns use each list and paginated.
+- An empty repeated field no longer produces an empty column.
+
+### Added
+- 18 pagination assertions, including that every row appears on exactly one page across the whole page range, that a page fits its character budget, that out-of-range page numbers clamp, and that a non-TSV renderer is honoured. Suite is at 166 assertions.
+
+### Removed
+- `capFindings`, `omittedFindingsNote`, `trimAudienceCoverage` and their limits (`FINDINGS_LIMIT`, `AUDIENCE_COVERAGE_LIMIT`) — replaced by `paginate` / `pageNote` and `rankAudienceCoverage`.
+
 ## v0.17.0
 
 Read tools returned pretty-printed JSON, which spends most of its bytes repeating
