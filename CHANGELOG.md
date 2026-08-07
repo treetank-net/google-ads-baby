@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.23.1
+
+### Changed
+- **Trimmed the text the model pays for on every call.** The batch hint that rides along in each
+  `prepare_*` response went from 704 to 349 characters, the three queue tools' descriptions from 973
+  to 674, and the server instructions from 2 900 to 2 686. Same instructions, told once instead of
+  explained: "Set complete? prepare_batch(all N tokens) = one preview, one safe word, one
+  confirmation" instead of a paragraph. Nothing was dropped — every rule still stated.
+
 ## v0.23.0
 
 The queue became something you can steer, not just fill.

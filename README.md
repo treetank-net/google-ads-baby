@@ -282,11 +282,11 @@ Confirmation & safety:
 - `confirm_all_mutations` — Execute ALL pending mutations in one batch
 - `confirm_mutation` — Execute a previously prepared mutation
 - `confirm_safe_word` — Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1
-- `discard_pending_mutations` — Drop prepared operations from the queue without executing them
+- `discard_pending_mutations` — Drop pending operations without executing them
 - `get_safety_setup` — Explain the current mutation safety model and how to install Codex hooks if plugin-local hooks are not active
 - `list_pending_mutations` — List all pending (unconfirmed) mutations with their previews and tokens
-- `prepare_batch` — Fold operations you already prepared into ONE batch under a single new safe word
-- `unfold_batch` — Take a batch apart into separately confirmable operations again, under one new server-generated safe word
+- `prepare_batch` — Fold pending operations into ONE batch: one combined preview, one new server-minted safe word, one confirmation
+- `unfold_batch` — Split a batch back into separate pending operations under one new safe word
 
 <!-- TOOLS:END -->
 

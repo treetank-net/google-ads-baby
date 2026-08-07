@@ -1,7 +1,7 @@
 {
   "name": "google-ads-baby",
   "description": "Google Ads campaign management MCP server with two-phase safety confirmations: build complete Search/Display/Performance Max campaigns, manage keywords, ads, budgets, targeting, ad schedules, conversion goals and assets, plus read-only account analysis (hygiene report, budget scaling, search-terms waste, PMax breakdown). Every mutation requires explicit user approval. Feedback & bug reports: Jacek Mariański (jmarianski@trans.eu)",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "author": {
     "name": "Jacek Mariański",
     "email": "jmarianski@trans.eu",

@@ -104,7 +104,7 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'prepare_batch',
-    'Fold operations you already prepared into ONE batch under a single new safe word. Use it when several prepare_* calls were made separately and the user should confirm them together — including tokens prepared earlier with different safe words. The server mints the batch safe word; show the combined preview and have the user reply with that word, then call confirm_mutation with the batch token. The batched tokens can no longer be confirmed on their own.',
+    'Fold pending operations into ONE batch: one combined preview, one new server-minted safe word, one confirmation. Works across earlier prepare_* calls with different safe words. Show the preview, get that word from the user, then confirm_mutation(batch token) runs them in order. Folded tokens leave the queue.',
     {
       tokens: z.array(z.string()).min(2).max(50)
         .describe('Tokens from earlier prepare_* calls, in the order they should run. Use list_pending_mutations to see what is still pending.'),
@@ -120,7 +120,7 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'discard_pending_mutations',
-    'Drop prepared operations from the queue without executing them. Nothing is sent to Google Ads, so no safe word is needed. Omit tokens to clear the whole queue; pass tokens to drop only those. Discarding a batch token drops the operations inside it too.',
+    'Drop pending operations without executing them. Nothing reaches Google Ads, so no safe word is needed. Omit tokens to clear the queue; a batch token drops its contents too.',
     {
       tokens: z.array(z.string()).min(1).max(50).optional()
         .describe('Tokens to drop. Omit to clear every pending operation.'),
@@ -144,7 +144,7 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'unfold_batch',
-    'Take a batch apart into separately confirmable operations again, under one new server-generated safe word. Use it to fix ONE operation inside a batch: unfold, discard_pending_mutations the wrong one, prepare a corrected version, then prepare_batch everything again.',
+    'Split a batch back into separate pending operations under one new safe word. To fix one operation: unfold, discard_pending_mutations the wrong one, prepare a corrected one, prepare_batch again.',
     {
       token: z.string().describe('Batch token returned by prepare_batch'),
     },
