@@ -32,6 +32,69 @@ export function resourceNameLiteral(value: string): string {
   return `'${gaqlString(value.trim())}'`;
 }
 
+export function buildCampaignStructureQuery(): string {
+  return `
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.status,
+      campaign.advertising_channel_type,
+      campaign_budget.amount_micros
+    FROM campaign
+    WHERE campaign.status != 'REMOVED'
+    ORDER BY campaign.name
+  `;
+}
+
+export function buildCampaignMetricsQuery(days: 7 | 30): string {
+  return `
+    SELECT
+      campaign.id,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.ctr,
+      metrics.cost_micros,
+      metrics.conversions,
+      metrics.conversions_value
+    FROM campaign
+    WHERE segments.date DURING LAST_${days}_DAYS
+  `;
+}
+
+const ZERO_METRICS = {
+  impressions: 0,
+  clicks: 0,
+  ctr: 0,
+  cost_micros: 0,
+  conversions: 0,
+  conversions_value: 0,
+};
+
+/**
+ * A campaign that served nothing still exists, and that is exactly the case a
+ * user asks about. So the structure query drives the list and metrics are joined
+ * onto it — a single query with `segments.date` drops every campaign without a
+ * statistics row for the window, which used to make paused and non-serving
+ * campaigns invisible.
+ */
+export function mergeCampaignMetrics(structureRows: any[], metricRows: any[]): unknown[] {
+  const metricsById = new Map<string, any>();
+  for (const row of metricRows) {
+    const id = String(row?.campaign?.id ?? '');
+    if (id) metricsById.set(id, row?.metrics ?? {});
+  }
+  return structureRows
+    .map((row) => ({
+      ...row,
+      metrics: { ...ZERO_METRICS, ...(metricsById.get(String(row?.campaign?.id ?? '')) ?? {}) },
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.metrics.cost_micros ?? 0) - Number(a.metrics.cost_micros ?? 0) ||
+        String(a.campaign?.name ?? '').localeCompare(String(b.campaign?.name ?? '')),
+    );
+}
+
 export function adFilter(input: AdBlueprintInput): string | null {
   if (input.ad_group_ad_resource_name?.trim()) {
     return `ad_group_ad.resource_name = ${resourceNameLiteral(input.ad_group_ad_resource_name)}`;

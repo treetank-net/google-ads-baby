@@ -50,21 +50,6 @@ export async function getAccountCurrency(cfg: AdsConfig, customerId: string): Pr
   }
 }
 
-export async function getCampaigns(cfg: AdsConfig, customerId: string, days: 7 | 30 = 30): Promise<unknown[]> {
-  const customer = getCustomer(cfg, customerId);
-  return customer.query(`
-    SELECT campaign.id, campaign.name, campaign.status,
-           campaign.advertising_channel_type,
-           metrics.impressions, metrics.clicks, metrics.ctr,
-           metrics.cost_micros, metrics.conversions,
-           metrics.conversions_value
-    FROM campaign
-    WHERE segments.date DURING LAST_${days}_DAYS
-      AND metrics.impressions > 0
-    ORDER BY metrics.cost_micros DESC
-  `);
-}
-
 export async function executeGaql(cfg: AdsConfig, customerId: string, query: string): Promise<unknown[]> {
   const customer = getCustomer(cfg, customerId);
   return customer.query(query);

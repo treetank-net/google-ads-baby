@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
-import { listAccounts, executeGaql, getCampaigns } from '../client.js';
+import { listAccounts, executeGaql } from '../client.js';
 import { formatError } from '../errors.js';
 import { normalizeCustomerId, requireCustomerId } from '../validation.js';
 import { tsvDocument, paginate, pageNote } from './format.js';
@@ -15,6 +15,9 @@ import {
   buildAdQuery,
   buildAdAssetQuery,
   buildListQuery,
+  buildCampaignStructureQuery,
+  buildCampaignMetricsQuery,
+  mergeCampaignMetrics,
   pageSchema,
   pageCharsSchema,
 } from './read-helpers.js';
@@ -44,7 +47,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_campaigns',
-    'Get campaigns with performance metrics for a specific account',
+    'Get campaigns with performance metrics for a specific account. Lists every campaign except REMOVED ones, including campaigns that served nothing in the window — those show zero metrics.',
     {
       customer_id: z.string().describe('Google Ads customer ID (e.g. "1234567890")'),
       days: z.enum(['7', '30']).default('30').describe('Lookback period'),
@@ -58,7 +61,11 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       }
       try {
         const cid = normalizeCustomerId(customer_id);
-        const rows = await getCampaigns(cfg, cid, Number(days) as 7 | 30);
+        const [structureRows, metricRows] = await Promise.all([
+          executeGaql(cfg, cid, buildCampaignStructureQuery()),
+          executeGaql(cfg, cid, buildCampaignMetricsQuery(Number(days) as 7 | 30)),
+        ]);
+        const rows = mergeCampaignMetrics(structureRows as any[], metricRows as any[]);
         const slice = paginate(rows as unknown[], page ?? 1, page_chars);
         const note = pageNote(slice, 'campaigns');
         const header = [`# campaigns for customer ${cid}, last ${days}d`, ...(note ? [note] : [])];

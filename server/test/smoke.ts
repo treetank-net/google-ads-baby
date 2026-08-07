@@ -75,7 +75,13 @@ import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNoti
 import { PLUGIN_VERSION } from '../src/constants.js';
 import { readFileSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
-import { buildAdBlueprint, buildListQuery } from '../src/tools/read-helpers.js';
+import {
+  buildAdBlueprint,
+  buildListQuery,
+  buildCampaignStructureQuery,
+  buildCampaignMetricsQuery,
+  mergeCampaignMetrics,
+} from '../src/tools/read-helpers.js';
 
 let passed = 0;
 let failed = 0;
@@ -663,6 +669,48 @@ function testEntityQueries() {
   }
 }
 
+function testCampaignListing() {
+  console.log('\n--- get_campaigns listing ---');
+
+  // On a live account with four PAUSED campaigns the tool returned zero rows:
+  // one query carried both `segments.date` and `metrics.impressions > 0`, so a
+  // campaign that served nothing was invisible exactly when it mattered.
+  const structure = buildCampaignStructureQuery();
+  assert('the structure query carries no metrics filter', !structure.includes('metrics.'));
+  assert('the structure query carries no date segment', !structure.includes('segments.date'));
+  assert('the structure query skips removed campaigns', structure.includes("campaign.status != 'REMOVED'"));
+  assert('the structure query reports the budget', structure.includes('campaign_budget.amount_micros'));
+
+  const metrics = buildCampaignMetricsQuery(7);
+  assert('the metrics query windows by date', metrics.includes('segments.date DURING LAST_7_DAYS'));
+  assert('the metrics query never filters on impressions', !metrics.includes('metrics.impressions >'));
+  for (const query of [structure, metrics]) {
+    assert('a campaign query has no OR', !query.includes(' OR '));
+  }
+
+  const merged = mergeCampaignMetrics(
+    [
+      { campaign: { id: '1', name: 'Spends', status: 'ENABLED' } },
+      { campaign: { id: '2', name: 'Silent paused', status: 'PAUSED' } },
+    ],
+    [{ campaign: { id: '1' }, metrics: { impressions: 120, clicks: 5, cost_micros: 4_000_000 } }],
+  ) as any[];
+  assert('a campaign without a statistics row survives the join', merged.length === 2);
+  const silent = merged.find((row) => row.campaign.id === '2');
+  assert('a campaign that served nothing reports zeros, not undefined', silent.metrics.impressions === 0 && silent.metrics.cost_micros === 0);
+  assert('the spender still leads the list', merged[0].campaign.id === '1');
+  assert('joined metrics survive the merge', merged[0].metrics.clicks === 5);
+
+  const tied = mergeCampaignMetrics(
+    [
+      { campaign: { id: '9', name: 'Beta' } },
+      { campaign: { id: '8', name: 'Alfa' } },
+    ],
+    [],
+  ) as any[];
+  assert('campaigns with no spend fall back to name order', tied[0].campaign.name === 'Alfa');
+}
+
 function testPagination() {
   console.log('\n--- Pagination by response size ---');
 
@@ -1018,6 +1066,7 @@ async function main() {
   testAnalysis();
   testFormat();
   testEntityQueries();
+  testCampaignListing();
   testPagination();
   testProfiles();
   testDisplayRemarketing();

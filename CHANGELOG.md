@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.21.2
+
+`get_campaigns` hid the campaigns most worth looking at.
+
+### Fixed
+- **`get_campaigns` lists every campaign, not only the ones that served.** The query carried both
+  `segments.date DURING LAST_N_DAYS` and `metrics.impressions > 0` in a single statement, so a
+  campaign with no statistics row for the window returned nothing at all. On a live account with
+  four PAUSED campaigns the tool answered "campaigns (0)" — the exact case a user asks about
+  (paused, brand-new, or not serving) was the one case invisible. Structure and metrics are now two
+  queries joined in code: campaigns drive the list, metrics are attached where they exist, and a
+  campaign that served nothing reports zeros. `REMOVED` campaigns stay out.
+
 ## v0.21.1
 
 The follow-up hardens account reads and mutation previews against live Google Ads states that the
