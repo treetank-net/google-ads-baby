@@ -48,7 +48,7 @@ tools/
   write-prepare-campaigns.ts — prepare_campaign_status, prepare_campaign_update, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_ad_group, prepare_ad_group_update, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
   write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
   write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status, prepare_ad_update
-  write-confirm.ts        — get_safety_setup, confirm_safe_word, confirm_mutation, confirm_all_mutations
+  write-confirm.ts        — get_safety_setup, confirm_safe_word, prepare_batch, confirm_mutation, confirm_all_mutations
 ```
 
 #### Jak dodawać nowe rzeczy
@@ -199,6 +199,28 @@ Multiple `prepare_*` calls can share the same `safe_word`. After one user confir
 - Confirm state is consumed once for the entire batch
 - Results are returned per-operation with success/failure status
 
+**Scalanie po fakcie — `prepare_batch`:**
+Gdy operacje przygotowano osobno (różne safe wordy) albo dopiero później okazało się, że mają pójść
+razem, `prepare_batch(tokens)` zwija dowolne pending tokeny w jeden: zbiorczy preview + **jedno nowe
+słowo generowane przez serwer** (`generateSafeWord()` w `confirm.ts`). Powody kształtu:
+- Słowo mintuje serwer, nie model. Model nie zna go przed utworzeniem batcha, więc nie może
+  przygotować promptu, który je zawiera — słowo może przyjść tylko z odpowiedzi użytkownika.
+- `createdAt` batcha jest nowszy niż wszystkich składowych, więc reguła „potwierdzenie nie może
+  poprzedzać operacji" (`consumeConfirmState`) pilnuje, że słowo wpisano po skompletowaniu listy.
+  Wcześniej dorzucenie starego tokenu do `confirm_all_mutations` działało jako efekt uboczny tego, że
+  plik safe worda trzyma **ostatnie** słowo, a stan porównywany jest z **najnowszym** tokenem —
+  potwierdzenie nie było wiązane z zawartością batcha.
+- Składowe tokeny **wypadają z kolejki** (`pending.delete`), żeby ta sama zmiana nie poszła dwa razy:
+  raz w batchu, raz osobno. Batche się nie zagnieżdżają, a jeden zły token odrzuca całość **bez**
+  konsumowania poprawnych (zła encja kosztuje retry, nie zużyte potwierdzenie).
+- Scalanie jest **jawnym wywołaniem, nie automatem**: mapa `pending` jest wspólna dla całego procesu
+  serwera, więc automatyczne łączenie wciągałoby operacje innej sesji. Zamiast automatu każdy
+  `prepare_*` dokłada `alsoPending` + `batchHint` (`batchableOperations()` w `write-helpers.ts`), żeby
+  wołający wiedział, co jest do scalenia.
+- Batch jest **sekwencyjny, nie atomowy** (jedno wywołanie API na operację). Przy częściowej porażce
+  wynik nazywa nieudane kroki i wskazuje wpisy historii `batch-<token>` z ich pełnymi parametrami.
+  Atomowe pozostają kompozyty `*_full` — to jedno `mutateResources`.
+
 ### OAuth Flow & Custom App Credentials
 1. LLM calls `auth_google_ads` → starts local HTTP server on port 9876
 2. Browser opens `http://127.0.0.1:9876/open` → landing page with optional custom OAuth app fields
@@ -238,7 +260,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
-- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 62 tools), `manage` (38 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
+- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 63 tools), `manage` (39 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 - `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` — capy w jednostkach waluty konta. Ustawione = brane dosłownie (bez skalowania). Nieustawione = domyślne 500/50/500 przemnożone przez `CURRENCY_UNIT_SCALE`.

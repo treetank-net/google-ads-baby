@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
 import type { PendingMutation } from '../confirm.js';
-import { confirmPendingSafeWord, consumeConfirmState, consumeToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import { confirmPendingSafeWord, consumeConfirmState, consumeToken, createBatchToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { recordFailure } from '../history.js';
 import { CODEX_HOOK_INSTALL_COMMAND } from './write-schemas.js';
-import { safetyHookNotice } from './write-helpers.js';
+import { prepareResponse, safetyHookNotice } from './write-helpers.js';
 import { executeMutation, formatMutationError } from './write-executor.js';
 
 export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
@@ -89,6 +89,22 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
         recordFailure(mutation.action, mutation.params as Record<string, any>, mutation.preview, errMsg);
         return { content: [{ type: 'text', text: `Error: ${errMsg}` }] };
       }
+    },
+  );
+
+  server.tool(
+    'prepare_batch',
+    'Fold operations you already prepared into ONE batch under a single new safe word. Use it when several prepare_* calls were made separately and the user should confirm them together — including tokens prepared earlier with different safe words. The server mints the batch safe word; show the combined preview and have the user reply with that word, then call confirm_mutation with the batch token. The batched tokens can no longer be confirmed on their own.',
+    {
+      tokens: z.array(z.string()).min(2).max(50)
+        .describe('Tokens from earlier prepare_* calls, in the order they should run. Use list_pending_mutations to see what is still pending.'),
+    },
+    async ({ tokens }) => {
+      const batch = createBatchToken(tokens);
+      if (!batch.ok) {
+        return { content: [{ type: 'text', text: `Error: ${batch.error}` }] };
+      }
+      return prepareResponse(cfg, batch.mutation, batch.mutation.preview);
     },
   );
 

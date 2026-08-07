@@ -47,6 +47,7 @@ import {
   sharedBudgetWarning,
   removedResourceError,
   validateResponsiveDisplayText,
+  batchableOperations,
 } from '../src/tools/write-helpers.js';
 import {
   analyzeAccountHygiene,
@@ -68,6 +69,15 @@ import {
   DISPLAY_REMARKETING_DEFAULTS,
   MICROS,
 } from '../src/tools/analysis-helpers.js';
+import {
+  BATCH_ACTION,
+  createToken,
+  createBatchToken,
+  generateSafeWord,
+  getPendingToken,
+  listPending,
+  consumeToken,
+} from '../src/confirm.js';
 import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
 import { registerAuthTools } from '../src/tools/auth.js';
@@ -457,6 +467,76 @@ function testLimitHelpers() {
 
   assert('identifier keys are not reported as changed fields', !updatedFieldNames({ customer_id: '1', ad_group_id: '2', status: 'PAUSED' }).includes('ad_group_id'));
   assert('changed fields are reported', updatedFieldNames({ customer_id: '1', cpc_bid_micros: 5, status: 'PAUSED' }).sort().join(',') === 'cpc_bid_micros,status');
+}
+
+function testBatchTokens() {
+  console.log('\n--- prepare_batch: folding prepared operations together ---');
+
+  for (const item of listPending()) consumeToken(item.token);
+
+  const word = generateSafeWord();
+  assert('a generated safe word matches the safe word pattern', /^[A-Za-z][A-Za-z0-9_-]{2,39}$/.test(word), word);
+  const words = new Set(Array.from({ length: 20 }, () => generateSafeWord()));
+  assert('generated safe words are not a constant', words.size > 15, `${words.size} distinct of 20`);
+
+  const first = createToken('campaign_status', { customer_id: '111', campaign_id: '1' }, 'Pause campaign 1', 'alfa');
+  const second = createToken('budget_change', { customer_id: '111', campaign_id: '2' }, 'Budget 5 -> 7 on campaign 2', 'beta');
+
+  const batch = createBatchToken([first.token, second.token]);
+  assert('two separately prepared tokens fold into a batch', batch.ok === true);
+  if (!batch.ok) return;
+
+  assert('the batch carries its own action', batch.mutation.action === BATCH_ACTION);
+  // The whole point: the operations had different safe words and the user gets
+  // one new word that covers both.
+  assert('the batch safe word differs from the folded ones', batch.mutation.safeWord !== 'alfa' && batch.mutation.safeWord !== 'beta');
+  assert('the batch preview names every operation', batch.mutation.preview.includes('Pause campaign 1') && batch.mutation.preview.includes('Budget 5 -> 7 on campaign 2'));
+  assert('the batch preview says it is not atomic', batch.mutation.preview.includes('NOT atomic'));
+  assert('the batch preview keeps the requested order', batch.mutation.preview.indexOf('Pause campaign 1') < batch.mutation.preview.indexOf('Budget 5 -> 7'));
+
+  // A folded token must not stay separately confirmable, or the same change
+  // could run twice — once inside the batch and once on its own.
+  assert('a folded token can no longer be confirmed alone', getPendingToken(first.token) === null && getPendingToken(second.token) === null);
+  assert('only the batch stays pending', listPending().length === 1 && listPending()[0].token === batch.mutation.token);
+
+  const operations = (batch.mutation.params as any).operations;
+  assert('the batch keeps each operation action and params', operations.length === 2 && operations[0].action === 'campaign_status' && operations[1].params.campaign_id === '2');
+
+  // The confirmation state check compares against the batch, which is newer than
+  // everything it contains, so a word typed before the batch existed cannot pass.
+  assert('the batch is newer than the operations it folds', batch.mutation.createdAt >= first.createdAt);
+
+  const nested = createBatchToken([batch.mutation.token, batch.mutation.token]);
+  assert('a token listed twice is rejected', nested.ok === false);
+
+  const survivor = createToken('campaign_status', { customer_id: '111', campaign_id: '3' }, 'Pause campaign 3', 'gamma');
+  const withBatch = createBatchToken([survivor.token, batch.mutation.token]);
+  assert('batches do not nest', withBatch.ok === false && String((withBatch as any).error).includes('already a batch'));
+
+  const withUnknown = createBatchToken([survivor.token, 'no-such-token']);
+  assert('an unknown token rejects the whole batch', withUnknown.ok === false);
+  // Validation must not consume the good tokens on the way to the bad one.
+  assert('a rejected batch leaves the valid operations pending', getPendingToken(survivor.token) !== null);
+
+  const tooFew = createBatchToken([survivor.token]);
+  assert('a one-operation batch is still built (the tool schema enforces two)', tooFew.ok === true);
+
+  for (const item of listPending()) consumeToken(item.token);
+
+  // A caller cannot batch what it does not know about: every prepare_* response
+  // has to name the operations still queued.
+  assert('an empty queue offers nothing to batch', batchableOperations('any-token').length === 0);
+  const queued = createToken('campaign_status', { customer_id: '111', campaign_id: '9' }, 'Pause campaign 9\nsecond line', 'delta');
+  const fresh = createToken('budget_change', { customer_id: '111', campaign_id: '10' }, 'Budget 3 -> 4', 'epsilon');
+  const offered = batchableOperations(fresh.token);
+  assert('the queue offer excludes the operation just prepared', offered.length === 1 && offered[0].token === queued.token);
+  assert('the queue offer carries the action and a one-line preview', offered[0].action === 'campaign_status' && offered[0].preview === 'Pause campaign 9');
+  assert('the queue offer reports how long the operation waited', typeof offered[0].ageSeconds === 'number');
+
+  const folded = createBatchToken([queued.token, fresh.token]);
+  assert('a batch itself is never offered for batching', folded.ok === true && batchableOperations('any-token').length === 0);
+
+  for (const item of listPending()) consumeToken(item.token);
 }
 
 function testToolContract() {
@@ -1073,6 +1153,7 @@ async function main() {
   testAccountCurrency();
   testLimitHelpers();
   testToolContract();
+  testBatchTokens();
   testTargeting();
   await testCapEnforcement();
 

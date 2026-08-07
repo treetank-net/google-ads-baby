@@ -1,7 +1,7 @@
 import { enums } from 'google-ads-api';
 import type { AdsConfig } from '../config.js';
 import { executeGaql } from '../client.js';
-import { createToken, getTokenTtlSeconds } from '../confirm.js';
+import { BATCH_ACTION, createToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
 import {
   MAX_IMAGE_BYTES,
@@ -579,7 +579,35 @@ export function safetyHookNotice(cfg: AdsConfig, safeWord?: string) {
   };
 }
 
+/**
+ * Operations still waiting for confirmation, other than the one just prepared.
+ *
+ * Batching used to be a decision that had to be made before the first
+ * `prepare_*`, and nothing told the caller that the queue already held something
+ * confirmable together with this — so separately prepared changes ended up
+ * costing the user one safe word each. Batching stays an explicit call
+ * (`prepare_batch`), because the queue is shared by every session on this server
+ * process and folding automatically would drag in operations nobody in this
+ * conversation asked for.
+ */
+export function batchableOperations(currentToken: string) {
+  return listPending()
+    .filter((item) => item.token !== currentToken && item.action !== BATCH_ACTION)
+    .map((item) => ({
+      token: item.token,
+      action: item.action,
+      preview: truncateLine(item.preview),
+      ageSeconds: Math.max(0, Math.round((Date.now() - item.createdAt) / 1000)),
+    }));
+}
+
+function truncateLine(preview: string): string {
+  const line = preview.split('\n')[0].trim();
+  return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+}
+
 export function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeWord: string }, preview: string) {
+  const alsoPending = batchableOperations(mutation.token);
   return {
     content: [{
       type: 'text' as const,
@@ -589,6 +617,10 @@ export function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeW
         safeWord: mutation.safeWord,
         expiresInSeconds: getTokenTtlSeconds(),
         instruction: `Show the user the preview and ask them to reply with the word "${mutation.safeWord}". Only after such a reply, call confirm_mutation with the token.`,
+        ...(alsoPending.length ? {
+          alsoPending,
+          batchHint: `${alsoPending.length} other operation(s) are still awaiting confirmation. If they belong with this one, call prepare_batch with all the tokens: it returns one combined preview and ONE new safe word for the whole set instead of asking the user once per operation. Otherwise confirm this one on its own.`,
+        } : {}),
         safety: safetyHookNotice(cfg, mutation.safeWord),
       }, null, 2),
     }],

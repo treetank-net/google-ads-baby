@@ -284,6 +284,7 @@ Confirmation & safety:
 - `confirm_safe_word` — Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1
 - `get_safety_setup` — Explain the current mutation safety model and how to install Codex hooks if plugin-local hooks are not active
 - `list_pending_mutations` — List all pending (unconfirmed) mutations with their previews and tokens
+- `prepare_batch` — Fold operations you already prepared into ONE batch under a single new safe word
 
 <!-- TOOLS:END -->
 

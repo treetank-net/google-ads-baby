@@ -1,5 +1,6 @@
 import type { AdsConfig } from '../config.js';
-import type { PendingMutation } from '../confirm.js';
+import type { BatchOperation, PendingMutation } from '../confirm.js';
+import { BATCH_ACTION } from '../confirm.js';
 import {
   createAdGroup,
   createAdSchedules,
@@ -48,6 +49,10 @@ import { MAX_IMAGE_BYTES } from './write-schemas.js';
 
 export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation, batchId?: string): Promise<string> {
   const p = mutation.params as Record<string, any>;
+
+  if (mutation.action === BATCH_ACTION) {
+    return executeBatch(cfg, mutation);
+  }
 
   const ok = (result?: unknown): string => {
     recordSuccess(mutation.action, p, mutation.preview, result, batchId);
@@ -258,6 +263,45 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   }
 
   return `Error: Unknown action: ${mutation.action}`;
+}
+
+async function executeBatch(cfg: AdsConfig, batch: PendingMutation): Promise<string> {
+  const operations = ((batch.params as Record<string, unknown>).operations ?? []) as BatchOperation[];
+  const batchId = `batch-${batch.token}`;
+  const results: string[] = [];
+  const failedActions: string[] = [];
+  let succeeded = 0;
+
+  for (let i = 0; i < operations.length; i += 1) {
+    const op = operations[i];
+    const label = `[${i + 1}/${operations.length}]`;
+    const step: PendingMutation = {
+      token: op.token,
+      action: op.action,
+      params: op.params,
+      preview: op.preview,
+      createdAt: batch.createdAt,
+      safeWord: batch.safeWord,
+    };
+    try {
+      results.push(`${label} ${await executeMutation(cfg, step, batchId)}`);
+      succeeded += 1;
+    } catch (err: any) {
+      const errMsg = formatMutationError(err);
+      recordFailure(op.action, op.params as Record<string, any>, op.preview, errMsg, batchId);
+      results.push(`${label} Error [${op.action}]: ${errMsg}`);
+      failedActions.push(`${label} ${op.action}`);
+    }
+  }
+
+  const summary = `Batch complete: ${succeeded} succeeded, ${failedActions.length} failed out of ${operations.length} operations.`;
+  // Operations run one API call each, so a partial batch is a real outcome and
+  // the failed steps have to be named — their full parameters stay in
+  // mutation-history.jsonl under this batch id, ready to be prepared again.
+  const retry = failedActions.length
+    ? `\n\nFailed steps to prepare again (successful ones must NOT be repeated): ${failedActions.join(', ')}. Their full parameters are in the mutation history under batch id ${batchId}.`
+    : '';
+  return `${summary}${retry}\n\n${results.join('\n\n')}`;
 }
 
 export function formatMutationError(err: any): string {

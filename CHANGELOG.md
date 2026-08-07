@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.22.0
+
+Batching stopped being a decision you had to make before the first `prepare_*`.
+
+### Added
+- **`prepare_batch` folds already-prepared operations into one batch.** Pass the tokens of any
+  pending operations — prepared minutes apart, each with its own safe word — and the server returns
+  one combined preview plus **one new safe word it generates itself**, covering the whole set.
+  `confirm_mutation` with the batch token then runs them in order. The folded tokens leave the queue,
+  so the same change cannot run twice (once inside the batch, once on its own), and batches do not
+  nest. A single invalid token rejects the batch without consuming the valid ones.
+- **Every `prepare_*` response now says what else is waiting.** When the queue holds other
+  unconfirmed operations, the response lists them (action, one-line preview, how long they waited)
+  and points at `prepare_batch`. Folding stays an explicit call: the pending queue is shared by every
+  session on the server process, so automatic merging would drag in operations this conversation
+  never asked for.
+
+### Notes
+- The batch safe word is minted server-side, not invented by the model. The model cannot know it
+  before the batch exists, so it cannot draft a prompt that already contains the word — the word can
+  only come from the user's reply. The confirmation-state check compares against the batch token,
+  which is newer than everything it folds, so a word typed before the batch was assembled cannot
+  confirm it.
+- A batch is sequential, not atomic: one API call per operation, so an earlier step can succeed while
+  a later one fails. The preview says so. When a batch ends partially, the result names the failed
+  steps and points at the mutation history entries (`batch-<token>`) that hold their full parameters
+  for a fresh `prepare_*`. Whole-campaign creation stays atomic through the composite `*_full` tools,
+  which are one `mutateResources` call.
+
 ## v0.21.2
 
 `get_campaigns` hid the campaigns most worth looking at.

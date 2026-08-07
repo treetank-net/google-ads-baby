@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getConfigDir } from './config.js';
@@ -10,6 +10,15 @@ export interface PendingMutation {
   preview: string;
   createdAt: number;
   safeWord: string;
+}
+
+export const BATCH_ACTION = 'batch';
+
+export interface BatchOperation {
+  token: string;
+  action: string;
+  params: Record<string, unknown>;
+  preview: string;
 }
 
 export const DEFAULT_TOKEN_TTL_SECONDS = 60 * 60;
@@ -74,6 +83,74 @@ export function createToken(action: string, params: Record<string, unknown>, pre
   pending.set(token, mutation);
   saveSafeWord(safeWord);
   return mutation;
+}
+
+const SAFE_WORD_CONSONANTS = 'bdgklmnprstwz';
+const SAFE_WORD_VOWELS = 'aeiouy';
+
+/**
+ * A batch's safe word is minted by the server, not invented by the model. The
+ * model cannot know it before the batch exists, so it cannot draft a prompt that
+ * already contains the word — the user's reply is the only place it can come from.
+ */
+export function generateSafeWord(syllables = 3): string {
+  let word = '';
+  for (let i = 0; i < syllables; i += 1) {
+    word += SAFE_WORD_CONSONANTS[randomInt(SAFE_WORD_CONSONANTS.length)];
+    word += SAFE_WORD_VOWELS[randomInt(SAFE_WORD_VOWELS.length)];
+  }
+  return word;
+}
+
+function batchPreview(operations: BatchOperation[]): string {
+  const lines = operations.map((op, index) => `[${index + 1}/${operations.length}] ${op.action}: ${op.preview}`);
+  return [
+    `Batch of ${operations.length} prepared operation(s), to run in this order:`,
+    ...lines,
+    'Operations run sequentially and are NOT atomic: an earlier one can succeed while a later one fails.',
+  ].join('\n\n');
+}
+
+/**
+ * Fold already-prepared operations into one batch under a single new safe word.
+ *
+ * Batching used to be a decision that had to be made before the first
+ * `prepare_*`: each call minted its own safe word, and folding an older token
+ * into a later confirmation only worked as a side effect of the safe-word file
+ * holding the LAST word and the confirmation state being compared against the
+ * NEWEST token. Nothing tied the user's reply to the contents of the batch, so
+ * an operation whose preview the user saw ten minutes ago (or never, since the
+ * pending map is shared by every session on this server process) could ride
+ * along. A batch token fixes both: the preview it carries IS the list, and its
+ * own safe word is what the user answers.
+ */
+export function createBatchToken(tokens: string[]):
+  | { ok: true; mutation: PendingMutation }
+  | { ok: false; error: string } {
+  const seen = new Set<string>();
+  const operations: BatchOperation[] = [];
+
+  for (const token of tokens) {
+    if (seen.has(token)) {
+      return { ok: false, error: `Token ${token} was listed twice. Each operation can join a batch once.` };
+    }
+    seen.add(token);
+
+    const mutation = getPendingToken(token);
+    if (!mutation) {
+      return { ok: false, error: `Token ${token} is invalid or expired. Prepare that operation again using prepare_*, then batch the fresh tokens.` };
+    }
+    if (mutation.action === BATCH_ACTION) {
+      return { ok: false, error: `Token ${token} is already a batch. Batches do not nest — list the individual operation tokens instead.` };
+    }
+    operations.push({ token: mutation.token, action: mutation.action, params: mutation.params, preview: mutation.preview });
+  }
+
+  // Nothing is consumed until every token validated: a bad token must cost a
+  // retry, not the operations that were fine.
+  for (const op of operations) pending.delete(op.token);
+
+  return { ok: true, mutation: createToken(BATCH_ACTION, { operations }, batchPreview(operations), generateSafeWord()) };
 }
 
 export function consumeToken(token: string): PendingMutation | null {
