@@ -619,7 +619,13 @@ export function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeW
         instruction: `Show the user the preview and ask them to reply with the word "${mutation.safeWord}". Only after such a reply, call confirm_mutation with the token.`,
         ...(alsoPending.length ? {
           alsoPending,
-          batchHint: `${alsoPending.length} other operation(s) are still awaiting confirmation. If they belong with this one, call prepare_batch with all the tokens: it returns one combined preview and ONE new safe word for the whole set instead of asking the user once per operation. Otherwise confirm this one on its own.`,
+          batchHint: [
+            `${alsoPending.length} other operation(s) are already prepared and awaiting confirmation.`,
+            'If more changes are coming, keep calling prepare_* first — do not ask the user to confirm yet.',
+            `When the set is complete, call prepare_batch with all ${alsoPending.length + 1} tokens: it returns one combined preview and ONE new safe word, so the user confirms once instead of ${alsoPending.length + 1} times.`,
+            'To drop an operation you no longer want, call discard_pending_mutations with its token — nothing reaches Google Ads.',
+            'Only fold operations this conversation prepared; the queue is shared by every session on this server process.',
+          ].join(' '),
         } : {}),
         safety: safetyHookNotice(cfg, mutation.safeWord),
       }, null, 2),

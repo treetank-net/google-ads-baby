@@ -73,17 +73,20 @@ import {
   BATCH_ACTION,
   createToken,
   createBatchToken,
+  discardTokens,
   generateSafeWord,
   getPendingToken,
   listPending,
   consumeToken,
+  resetConfirmGate,
+  unfoldBatch,
 } from '../src/confirm.js';
 import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
 import { registerAuthTools } from '../src/tools/auth.js';
 import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
 import { PLUGIN_VERSION } from '../src/constants.js';
-import { readFileSync } from 'fs';
+import { mkdtempSync, readFileSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
 import {
   buildAdBlueprint,
@@ -472,6 +475,21 @@ function testLimitHelpers() {
 function testBatchTokens() {
   console.log('\n--- prepare_batch: folding prepared operations together ---');
 
+  // createToken writes the safe word to the config dir, so an unisolated run
+  // would overwrite the live gate state of a real session — and with a word the
+  // test just printed.
+  const realDataDir = process.env['GOOGLE_ADS_BABY_DATA'];
+  process.env['GOOGLE_ADS_BABY_DATA'] = mkdtempSync(join(tmpdir(), 'gads-batch-smoke-'));
+
+  try {
+    runBatchTokenChecks();
+  } finally {
+    if (realDataDir === undefined) delete process.env['GOOGLE_ADS_BABY_DATA'];
+    else process.env['GOOGLE_ADS_BABY_DATA'] = realDataDir;
+  }
+}
+
+function runBatchTokenChecks() {
   for (const item of listPending()) consumeToken(item.token);
 
   const word = generateSafeWord();
@@ -536,7 +554,39 @@ function testBatchTokens() {
   const folded = createBatchToken([queued.token, fresh.token]);
   assert('a batch itself is never offered for batching', folded.ok === true && batchableOperations('any-token').length === 0);
 
-  for (const item of listPending()) consumeToken(item.token);
+  // Unfolding is how one operation inside a batch gets corrected without
+  // retyping the rest.
+  if (!folded.ok) return;
+  const unfolded = unfoldBatch(folded.mutation.token);
+  assert('a batch unfolds back into its operations', unfolded.ok === true);
+  if (!unfolded.ok) return;
+  assert('unfolding restores every operation', unfolded.mutations.length === 2);
+  assert('the batch token is gone after unfolding', getPendingToken(folded.mutation.token) === null);
+  assert('unfolded operations are separately pending', unfolded.mutations.every((m) => getPendingToken(m.token) !== null));
+  const unfoldedWords = new Set(unfolded.mutations.map((m) => m.safeWord));
+  assert('unfolded operations share one new safe word', unfoldedWords.size === 1 && !unfoldedWords.has(folded.mutation.safeWord));
+  assert('unfolding preserves each action', unfolded.mutations.map((m) => m.action).join(',') === 'campaign_status,budget_change');
+  assert('a single operation cannot be unfolded', unfoldBatch(unfolded.mutations[0].token).ok === false);
+  assert('an unknown token cannot be unfolded', unfoldBatch('no-such-token').ok === false);
+
+  // Discarding is the way out of a queue that was built by mistake — and it must
+  // never reach the API, so it needs no safe word.
+  const dropped = discardTokens([unfolded.mutations[0].token, 'no-such-token']);
+  assert('discarding removes the named operation', dropped.discarded.length === 1 && dropped.discarded[0].token === unfolded.mutations[0].token);
+  assert('discarding reports tokens it could not find', dropped.missing.length === 1);
+  assert('a discarded operation leaves the queue', getPendingToken(unfolded.mutations[0].token) === null);
+  assert('discarding one operation keeps the others', getPendingToken(unfolded.mutations[1].token) !== null);
+
+  createToken('campaign_status', { customer_id: '111', campaign_id: '11' }, 'Pause campaign 11', 'zeta');
+  const clearedAll = discardTokens();
+  assert('discarding without tokens clears the whole queue', clearedAll.discarded.length === 2 && listPending().length === 0);
+
+  // Emptying the queue must not leave the hook able to confirm a future
+  // operation, and must not leave the safe word file missing either — the hook
+  // reads a missing word as "any message confirms".
+  resetConfirmGate();
+  const gateWord = readFileSync(join(getConfigDir(), '.gads-safe-word'), 'utf-8').trim();
+  assert('resetting the gate leaves an unguessable safe word behind', /^[a-z]{6}$/.test(gateWord), gateWord);
 }
 
 function testToolContract() {

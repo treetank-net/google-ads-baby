@@ -24,7 +24,7 @@ constants.ts              — współdzielone stałe + PLUGIN_VERSION (pilnowany
 client.ts                 — barrel re-export z client/
 
 client/
-  core.ts                 — getCustomer(), listAccounts(), getAccountCurrency() (cache per konto), getCampaigns(), executeGaql()
+  core.ts                 — getCustomer(), listAccounts(), getAccountCurrency() (cache per konto), executeGaql()
   campaigns.ts            — campaign CRUD, ad group create, targeting, bidding, demographics, conversion goals, shared sets, ad schedules
   ads.ts                  — responsive search/display ad, keywords, negative keywords, keyword/ad status changes
   assets.ts               — asset groups, extensions, sitelinks, callouts, image upload, linking
@@ -48,7 +48,7 @@ tools/
   write-prepare-campaigns.ts — prepare_campaign_status, prepare_campaign_update, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_ad_group, prepare_ad_group_update, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
   write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
   write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status, prepare_ad_update
-  write-confirm.ts        — get_safety_setup, confirm_safe_word, prepare_batch, confirm_mutation, confirm_all_mutations
+  write-confirm.ts        — get_safety_setup, confirm_safe_word, prepare_batch, discard_pending_mutations, unfold_batch, confirm_mutation, confirm_all_mutations
 ```
 
 #### Jak dodawać nowe rzeczy
@@ -221,6 +221,23 @@ słowo generowane przez serwer** (`generateSafeWord()` w `confirm.ts`). Powody k
   wynik nazywa nieudane kroki i wskazuje wpisy historii `batch-<token>` z ich pełnymi parametrami.
   Atomowe pozostają kompozyty `*_full` — to jedno `mutateResources`.
 
+**Sterowanie kolejką — `discard_pending_mutations` i `unfold_batch`:**
+- Odrzucenie **nie jest mutacją** (nic nie leci do API), więc nie wymaga safe worda. Bez `tokens`
+  czyści całą kolejkę, z `tokens` wybrane.
+- Opróżnienie kolejki resetuje bramkę (`resetConfirmGate()`): usuwa stan potwierdzenia i **nadpisuje**
+  plik safe worda świeżym losowym słowem. Nie usuwa go, bo hook traktuje **brak** słowa jako
+  „dowolna wiadomość potwierdza" (`if (!safeWord || safeWordPresent(...))` w `scripts/safety-hook.js`)
+  — usunięcie pliku osłabiłoby bramkę zamiast po niej posprzątać.
+- Poprawka jednej operacji w batchu: `unfold_batch` → `discard_pending_mutations` tej złej →
+  `prepare_*` poprawionej → `prepare_batch` całości. Dzięki temu nie trzeba dispatchera
+  `prepareMutation()` ani edycji `params` pod istniejącym tokenem (co zerwałoby powiązanie „preview,
+  który user zobaczył" ↔ „to, co się wykona").
+- Rozpakowane operacje dzielą **jedno nowe** słowo serwerowe — słowo batcha było pokazane dla listy,
+  która już nie istnieje.
+- Testy dotykające `createToken()` muszą podmienić `GOOGLE_ADS_BABY_DATA` na katalog tymczasowy:
+  `createToken` zapisuje safe word do katalogu konfiguracyjnego, więc nieizolowany test nadpisuje
+  bramkę żywej sesji — i to słowem, które sam zawiera.
+
 ### OAuth Flow & Custom App Credentials
 1. LLM calls `auth_google_ads` → starts local HTTP server on port 9876
 2. Browser opens `http://127.0.0.1:9876/open` → landing page with optional custom OAuth app fields
@@ -260,7 +277,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
-- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 63 tools), `manage` (39 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
+- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 65 tools), `manage` (41 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 - `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` — capy w jednostkach waluty konta. Ustawione = brane dosłownie (bez skalowania). Nieustawione = domyślne 500/50/500 przemnożone przez `CURRENCY_UNIT_SCALE`.

@@ -2,7 +2,17 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AdsConfig } from '../config.js';
 import type { PendingMutation } from '../confirm.js';
-import { confirmPendingSafeWord, consumeConfirmState, consumeToken, createBatchToken, getPendingToken, getTokenTtlSeconds, listPending } from '../confirm.js';
+import {
+  confirmPendingSafeWord,
+  consumeConfirmState,
+  consumeToken,
+  createBatchToken,
+  discardTokens,
+  getPendingToken,
+  getTokenTtlSeconds,
+  listPending,
+  unfoldBatch,
+} from '../confirm.js';
 import { recordFailure } from '../history.js';
 import { CODEX_HOOK_INSTALL_COMMAND } from './write-schemas.js';
 import { prepareResponse, safetyHookNotice } from './write-helpers.js';
@@ -105,6 +115,56 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
         return { content: [{ type: 'text', text: `Error: ${batch.error}` }] };
       }
       return prepareResponse(cfg, batch.mutation, batch.mutation.preview);
+    },
+  );
+
+  server.tool(
+    'discard_pending_mutations',
+    'Drop prepared operations from the queue without executing them. Nothing is sent to Google Ads, so no safe word is needed. Omit tokens to clear the whole queue; pass tokens to drop only those. Discarding a batch token drops the operations inside it too.',
+    {
+      tokens: z.array(z.string()).min(1).max(50).optional()
+        .describe('Tokens to drop. Omit to clear every pending operation.'),
+    },
+    async ({ tokens }) => {
+      const { discarded, missing } = discardTokens(tokens);
+      if (!discarded.length) {
+        const note = missing.length ? ` Unknown or already-gone tokens: ${missing.join(', ')}.` : '';
+        return { content: [{ type: 'text', text: `No pending operations were discarded.${note}` }] };
+      }
+      const lines = discarded.map((m) => `- ${m.action}: ${m.preview.split('\n')[0]}`);
+      const note = missing.length ? `\n\nUnknown or already-gone tokens (nothing to drop): ${missing.join(', ')}.` : '';
+      return {
+        content: [{
+          type: 'text',
+          text: `Discarded ${discarded.length} pending operation(s); nothing was sent to Google Ads:\n${lines.join('\n')}${note}`,
+        }],
+      };
+    },
+  );
+
+  server.tool(
+    'unfold_batch',
+    'Take a batch apart into separately confirmable operations again, under one new server-generated safe word. Use it to fix ONE operation inside a batch: unfold, discard_pending_mutations the wrong one, prepare a corrected version, then prepare_batch everything again.',
+    {
+      token: z.string().describe('Batch token returned by prepare_batch'),
+    },
+    async ({ token }) => {
+      const result = unfoldBatch(token);
+      if (!result.ok) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
+      }
+      const lines = result.mutations.map((m, i) => `[${i + 1}] token ${m.token} — ${m.action}: ${m.preview.split('\n')[0]}`);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            unfolded: result.mutations.length,
+            safeWord: result.mutations[0]?.safeWord,
+            operations: lines,
+            instruction: 'These operations are pending separately now. Drop the ones you do not want with discard_pending_mutations, prepare corrected versions if needed, then call prepare_batch again — it mints a fresh safe word for the final list. The batch token is gone.',
+          }, null, 2),
+        }],
+      };
     },
   );
 

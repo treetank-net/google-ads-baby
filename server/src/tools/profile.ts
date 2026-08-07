@@ -26,6 +26,8 @@ export const TOOL_PROFILE: Record<string, ToolProfile> = {
   confirm_mutation: 'manage',
   confirm_all_mutations: 'manage',
   prepare_batch: 'manage',
+  discard_pending_mutations: 'manage',
+  unfold_batch: 'manage',
   prepare_campaign_status: 'manage',
   prepare_campaign_update: 'manage',
   prepare_budget_change: 'manage',

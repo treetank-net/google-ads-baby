@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.23.0
+
+The queue became something you can steer, not just fill.
+
+### Added
+- **`discard_pending_mutations` drops prepared operations without executing them.** Omit `tokens` to
+  clear the whole queue, pass tokens to drop only those. Nothing reaches Google Ads, so no safe word
+  is required. Emptying the queue also resets the confirmation gate — and overwrites the safe-word
+  file with a word nobody was shown rather than deleting it, because the hook reads a *missing* safe
+  word as "any user message confirms".
+- **`unfold_batch` takes a batch apart again**, into separately confirmable operations sharing one
+  new server-minted safe word. This is how a single operation inside a batch gets corrected without
+  retyping the others: unfold, discard the wrong one, prepare a fixed version, batch again.
+
+### Changed
+- **The batch hint in every `prepare_*` response now says what to do next**, not just that something
+  is queued: keep preparing while more changes are coming, call `prepare_batch` with all the tokens
+  once the set is complete (one confirmation instead of N), and drop unwanted operations with
+  `discard_pending_mutations`.
+
+### Fixed
+- **The smoke suite no longer writes to the real config directory.** `createToken` saves the safe word
+  to `~/.google-ads-baby/.gads-safe-word`, so running the tests overwrote the gate state of a live
+  session — with a word the test itself contains. The batch tests now run against a temporary data
+  directory.
+
 ## v0.22.0
 
 Batching stopped being a decision you had to make before the first `prepare_*`.

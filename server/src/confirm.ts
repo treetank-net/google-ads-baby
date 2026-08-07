@@ -153,6 +153,72 @@ export function createBatchToken(tokens: string[]):
   return { ok: true, mutation: createToken(BATCH_ACTION, { operations }, batchPreview(operations), generateSafeWord()) };
 }
 
+/**
+ * Drop prepared operations without executing them. Nothing reaches the API, so
+ * this needs no safe word — it only empties the queue.
+ *
+ * The confirmation gate is reset too, and the safe word file is overwritten with
+ * a word nobody has been shown rather than deleted: the hook treats a MISSING
+ * safe word as "any user message confirms", so removing the file would weaken
+ * the gate instead of cleaning up after it.
+ */
+export function discardTokens(tokens?: string[]): { discarded: PendingMutation[]; missing: string[] } {
+  const discarded: PendingMutation[] = [];
+  const missing: string[] = [];
+
+  if (!tokens) {
+    discarded.push(...pending.values());
+    pending.clear();
+  } else {
+    for (const token of tokens) {
+      const mutation = pending.get(token);
+      if (!mutation) {
+        missing.push(token);
+        continue;
+      }
+      pending.delete(token);
+      discarded.push(mutation);
+    }
+  }
+
+  if (pending.size === 0) resetConfirmGate();
+  return { discarded, missing };
+}
+
+export function resetConfirmGate(): void {
+  try { unlinkSync(getConfirmStatePath()); } catch {}
+  try { saveSafeWord(generateSafeWord()); } catch {}
+}
+
+/**
+ * Take a batch apart into separately confirmable operations again.
+ *
+ * This is how a single operation inside a batch gets corrected without
+ * retyping the others: unfold, discard the one that was wrong, prepare a fixed
+ * version of it, then batch everything again. The unfolded operations share one
+ * new server-minted safe word — the batch's word was shown for a list that no
+ * longer exists.
+ */
+export function unfoldBatch(token: string):
+  | { ok: true; mutations: PendingMutation[] }
+  | { ok: false; error: string } {
+  const batch = getPendingToken(token);
+  if (!batch) {
+    return { ok: false, error: `Token ${token} is invalid or expired. Nothing to unfold.` };
+  }
+  if (batch.action !== BATCH_ACTION) {
+    return { ok: false, error: `Token ${token} is a single operation, not a batch. Use discard_pending_mutations to drop it.` };
+  }
+
+  const operations = (batch.params.operations ?? []) as BatchOperation[];
+  pending.delete(token);
+  const safeWord = generateSafeWord();
+  return {
+    ok: true,
+    mutations: operations.map((op) => createToken(op.action, op.params, op.preview, safeWord)),
+  };
+}
+
 export function consumeToken(token: string): PendingMutation | null {
   const mutation = pending.get(token);
   if (!mutation) return null;
