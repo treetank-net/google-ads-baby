@@ -245,6 +245,10 @@ słowo generowane przez serwer** (`generateSafeWord()` w `confirm.ts`). Powody k
 4. Custom credentials are saved to `config.json` and used for all subsequent OAuth flows
 5. After clicking "Sign in with Google" → standard OAuth consent → callback → dev token + account selection page
 
+Port allocation across the *-baby plugins (so several auth flows can run side by side):
+9876 = google-ads-baby, 9877 = google-analytics-baby, 9878 = meta-ads-baby. 9876 is registered as the
+OAuth redirect URI of the built-in Google client — do not change it here without updating that client.
+
 ## Repo & CI
 - GitLab: `treetank/google-ads-baby` (origin, primary)
 - GitHub: `treetank-net/google-ads-baby` (mirror, remote `gh`)
