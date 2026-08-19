@@ -249,6 +249,14 @@ Port allocation across the *-baby plugins (so several auth flows can run side by
 9876 = google-ads-baby, 9877 = google-analytics-baby, 9878 = meta-ads-baby. 9876 is registered as the
 OAuth redirect URI of the built-in Google client — do not change it here without updating that client.
 
+## Aktualizacje
+- JEDYNA ścieżka aktualizacji: tool `update_plugin`. `scripts/start-mcp.js` NIE aktualizuje na starcie —
+  pobiera pliki runtime tylko wtedy, gdy nie ma bundla (stale cache CDN nadpisywał świeższą instalację starszymi plikami).
+- Bramka w `update_plugin` używa porównania semver, nie `!==` — kopia nowsza od serwera aktualizacji zostaje nietknięta.
+- Pobieranie jest atomowe (`<plik>.download` + `renameSync`).
+- `PLUGIN_VERSION` z `constants.ts` jest wkompilowany w bundle i służy do odróżnienia wersji POBRANEJ (package.json na dysku)
+  od AKTYWNEJ (kod w pamięci procesu) — proces nie umie podmienić swojego bundla w locie.
+
 ## Repo & CI
 - GitLab: `treetank/google-ads-baby` (origin, primary)
 - GitHub: `treetank-net/google-ads-baby` (mirror, remote `gh`)
