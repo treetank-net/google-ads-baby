@@ -115,7 +115,7 @@ kosztuje ~54 tokeny, a `get_ad_creatives` w meta ~160, więc stała liczba wiers
 budżet, raz go marnuje. `paginate()` przyjmuje renderer (`toTsv` domyślnie, `JSON.stringify` dla
 `findings`), bo strona musi mieścić się w budżecie w formacie, w którym naprawdę wyjdzie.
 `list_ads_entities` pobiera do `MAX_FETCH_LIMIT` (5000) wierszy i mówi w nagłówku, gdy w nią trafi;
-`limit` to od 0.24 top-N wyświetlania jak w każdym toolu tabelarycznym (kontrakt), nie granica pobrania. Sortowanie przed paginacją jest obowiązkowe tam, gdzie
+`limit` to top-N wyświetlania jak w każdym toolu tabelarycznym (kontrakt), nie granica pobrania. Sortowanie przed paginacją jest obowiązkowe tam, gdzie
 istnieje ważność (`sortFindings` po severity, `rankAudienceCoverage` po liczbie kampanii) — strona 1
 musi nieść to, co najważniejsze.
 
@@ -186,7 +186,7 @@ opisuje pułapki GAQL (brak `OR`/`JOIN`/`GROUP BY`, enumy jako liczby, micros, m
 w kodzie — należy tutaj, nie do kolejnego zdania w instrukcjach serwera.
 
 **Konwencje:**
-- Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`
+- Każdy prepare tool tworzy token przez `createToken()` i zwraca przez `prepareResponse()`: zwykły tekst (preview, token, safe word, jedna linia instrukcji, kolejka), bez JSON-a i bez bloku safety; instalacja hooków jest w `get_safety_setup` i instrukcjach serwera
 - Limity kwotowe **wyłącznie** przez helpery z `write-helpers.ts`: `budgetLimitError()`, `cpcLimitError()`, `targetCpaLimitError()`, a dla payloadów zagnieżdżonych (`*_full`) `amountFieldLimitError()`, który rekurencyjnie sprawdza każde pole `*_amount` wg reguł `AMOUNT_FIELD_LIMITS`. Każdy z nich przyjmuje `AmountLimits` — handler musi najpierw zrobić `const limits = await loadAmountLimits(cfg, normalizedCustomerId)`. Nie powtarzaj ręcznych `if (micros > MAX_...)` w handlerach — `test/smoke.ts` przechodzi po wszystkich zarejestrowanych toolach i wywołuje każde pole `*_amount` z absurdalną kwotą, więc pominięty limit oblewa testy.
 - Customer ID normalizacja: `normalizeCustomerId()` + `validateCustomer()` na początku każdego handlera
 - Nie dodawaj komentarzy w kodzie — nazwy funkcji/zmiennych muszą być samodokumentujące

@@ -190,7 +190,9 @@ cannot fix delivery there.
   `discard_pending_mutations` without tokens clears it, and nothing reaches
   Google Ads.
 - **History.** `get_mutation_history` and `get_mutation_stats` read the local
-  audit log. Use them to replicate earlier campaigns or reuse asset IDs.
+  audit log. History returns previews by default. Pass `include_params: true`
+  for the full call params when you replicate an earlier campaign or reuse asset
+  IDs.
 - **Profiles.** `GOOGLE_ADS_BABY_PROFILE=read` registers no mutation tools.
   `manage` allows edits to existing entities. `full` adds creation, assets,
   cloning and the composite builders. Changing the profile requires a server

@@ -85,6 +85,7 @@ import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
 import { registerAuthTools } from '../src/tools/auth.js';
 import { compactToolListing, compactSchema } from '../src/tools/compact-listing.js';
+import { renderReport } from '../src/tools/read-analysis.js';
 import { columnName, normalizeRows, shapeRows, tableDocument, layoutFor, ShapeError, DEFAULT_TABLE_PAGE_CHARS } from '../src/tools/table.js';
 import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
 import { PLUGIN_VERSION } from '../src/constants.js';
@@ -263,7 +264,7 @@ function registeredForProfile(profile: ToolProfile): Record<string, any> {
 }
 
 const LISTING_BUDGET_CHARS: Record<ToolProfile, number> = { read: 15_000, manage: 30_000, full: 45_000 };
-const TOOL_DESCRIPTION_BUDGET = 400;
+const TOOL_DESCRIPTION_BUDGET = 200;
 const PARAM_DESCRIPTION_BUDGET = 100;
 
 async function listedTools(profile: ToolProfile): Promise<any[]> {
@@ -367,6 +368,26 @@ function testTable() {
   assert('a multi-page table says how to get more', /# page 1\/\d+, rows 1-\d+ of 2000; page: 2 for more/.test(paged));
   const page2 = tableDocument({ title: 'terms', rows: many, defaultOrder: '-cost', shape: { page: 2 } });
   assert('page 2 continues where page 1 stopped', !page2.includes('term number 1999 ') && page2.includes('# page 2/'));
+}
+
+function testReportRendering() {
+  console.log('\n--- Analysis report rendering ---');
+
+  const term = (t: string, cost: number, conv: number) => ({ search_term_view: { search_term: t }, campaign: { name: 'Generic' }, metrics: { cost_micros: cost * 1_000_000, conversions: conv } }) as any;
+  const recent = Array.from({ length: 40 }, (_, i) => term(`waste term ${i}`, 60 + i * 5, 0));
+  const { findings, excluded_bounce_back } = analyzeSearchTermsWaste([...recent, term('comeback', 80, 0)], [term('comeback', 200, 3)]);
+  const text = renderReport({
+    name: 'search_terms_waste', customerId: '123', scope: ['recent 30d'], ctx: { currency: 'PLN', scale: 1 },
+    counts: { terms_scanned: 41 }, findings, lists: [['excluded bounce-backs', excluded_bounce_back]],
+  });
+  assert('report is TSV text, not JSON', text.startsWith('# search_terms_waste · customer 123') && text.includes('\nseverity\tentity\t'));
+  assert('header carries counts per severity', /terms_scanned=41 critical=\d+ warning=\d+ info=\d+/.test(text));
+  assert('task fields constant across findings are said once', (text.match(/google-ads-monthly-review\.md/g) ?? []).length === 1);
+  assert('bounce-backs are listed in one line', text.includes('excluded bounce-backs (1): comeback'));
+  assert('no follow_up boilerplate in the response', !text.includes('append_task'));
+  assert('the most severe findings come first', text.split('\n').find((l) => l.startsWith('warning') || l.startsWith('info'))?.startsWith('warning') === true);
+  const json = JSON.stringify({ findings }, null, 2).length;
+  assert('the report is much smaller than the old pretty JSON', text.length < json / 2, `tsv=${text.length} json=${json}`);
 }
 
 function testProfiles() {
@@ -1306,6 +1327,7 @@ async function main() {
   testAnalysis();
   testFormat();
   testTable();
+  testReportRendering();
   testEntityQueries();
   testCampaignListing();
   testPagination();

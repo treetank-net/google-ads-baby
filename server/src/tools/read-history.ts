@@ -14,8 +14,9 @@ export function registerHistoryReadTools(server: McpServer, cfg: AdsConfig) {
       until: z.string().optional().describe('ISO date'),
       success_only: z.boolean().optional().default(false),
       limit: z.number().optional().default(20).describe('Default 20, max 200'),
+      include_params: z.boolean().optional().describe('Add the full call params, e.g. to replicate a campaign'),
     },
-    async ({ customer_id, action, since, until, success_only, limit }) => {
+    async ({ customer_id, action, since, until, success_only, limit, include_params }) => {
       const entries = readHistory({
         customerId: customer_id,
         action,
@@ -33,12 +34,12 @@ export function registerHistoryReadTools(server: McpServer, cfg: AdsConfig) {
         customerId: e.customerId,
         success: e.success,
         preview: e.preview,
-        params: e.params,
+        ...(include_params ? { params: e.params } : {}),
         ...(e.assetIds?.length ? { assetIds: e.assetIds } : {}),
         ...(e.error ? { error: e.error } : {}),
         ...(e.batchId ? { batchId: e.batchId } : {}),
       }));
-      return { content: [{ type: 'text', text: JSON.stringify(formatted, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(formatted) }] };
     },
   );
 
@@ -53,7 +54,7 @@ export function registerHistoryReadTools(server: McpServer, cfg: AdsConfig) {
       if (stats.total === 0) {
         return { content: [{ type: 'text', text: 'No mutation history yet.' }] };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(stats) }] };
     },
   );
 }

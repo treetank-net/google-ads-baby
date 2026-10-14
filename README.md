@@ -216,10 +216,10 @@ Read:
 Read-only analysis (review loops — findings + suggested follow-up task + possible `prepare_*` actions; never mutate):
 
 - `get_account_hygiene_report` — Daily check: zero spend, low budget use, spend without conversions
-- `get_budget_scaling_candidates` — Budget-limited SEARCH/SHOPPING campaigns worth scaling, with prepare_budget_change actions.search impression share lost to budget (> 10%), per the google-ads-monthly-review workflow
+- `get_budget_scaling_candidates` — Budget-limited SEARCH/SHOPPING campaigns worth scaling, with prepare_budget_change actions
 - `get_display_remarketing_diagnostics` — Why a Display remarketing campaign is not serving: status, lists, audience size, bids
 - `get_pmax_channel_breakdown` — Performance Max cost and conversions per asset group, flagging spend without conversions
-- `get_search_terms_waste_candidates` — Search terms with spend and 0 conversions (bounce-backs excluded) as negative-keyword candidates.cross-checked against a longer window so historically-converting terms (bounce-backs) are excluded, per the google-ads-monthly-review workflow
+- `get_search_terms_waste_candidates` — Search terms with spend and 0 conversions (bounce-backs excluded) as negative-keyword candidates
 
 Mutation history:
 

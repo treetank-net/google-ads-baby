@@ -56,8 +56,9 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
 
   const ok = (result?: unknown): string => {
     recordSuccess(mutation.action, p, mutation.preview, result, batchId);
-    if (result) return `OK: ${mutation.preview} — done.\n${JSON.stringify(result, null, 2)}`;
-    return `OK: ${mutation.preview} — done.`;
+    const headline = mutation.preview.split('\n')[0];
+    if (result) return `OK: ${headline} — done.\n${JSON.stringify(result)}`;
+    return `OK: ${headline} — done.`;
   };
 
   if (mutation.action === 'keyword_status') {

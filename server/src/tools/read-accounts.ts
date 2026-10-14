@@ -221,7 +221,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify(buildAdBlueprint(adRows[0], assetRows), null, 2),
+            text: JSON.stringify(buildAdBlueprint(adRows[0], assetRows)),
           }],
         };
       } catch (err) {

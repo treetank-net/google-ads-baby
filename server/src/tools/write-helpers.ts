@@ -608,21 +608,16 @@ function truncateLine(preview: string): string {
 
 export function prepareResponse(cfg: AdsConfig, mutation: { token: string; safeWord: string }, preview: string) {
   const alsoPending = batchableOperations(mutation.token);
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({
-        preview,
-        token: mutation.token,
-        safeWord: mutation.safeWord,
-        expiresInSeconds: getTokenTtlSeconds(),
-        instruction: `Show the user the preview and ask them to reply with the word "${mutation.safeWord}". Only after such a reply, call confirm_mutation with the token.`,
-        ...(alsoPending.length ? {
-          alsoPending,
-          batchHint: `${alsoPending.length} more prepared. More changes coming? Keep calling prepare_*, do not ask to confirm yet. Set complete? prepare_batch(all ${alsoPending.length + 1} tokens) = one preview, one safe word, one confirmation. Unwanted? discard_pending_mutations(token). Fold only tokens this conversation prepared — the queue is shared across sessions.`,
-        } : {}),
-        safety: safetyHookNotice(cfg, mutation.safeWord),
-      }, null, 2),
-    }],
-  };
+  const lines = [
+    preview,
+    '',
+    `token: ${mutation.token} · safe word: "${mutation.safeWord}" · expires in ${getTokenTtlSeconds()}s`,
+    `Ask the user to reply with "${mutation.safeWord}"; call confirm_mutation only after that reply.`,
+  ];
+  if (cfg.safetyLevel === 'off') lines.push('Safety level off: the client hook gate is disabled.');
+  if (alsoPending.length) {
+    lines.push(`Also pending (${alsoPending.length}); prepare_batch over all ${alsoPending.length + 1} tokens gives one confirmation. Fold only tokens this conversation prepared:`);
+    for (const item of alsoPending) lines.push(`${item.token}\t${item.action}\t${item.preview}\t${item.ageSeconds}s`);
+  }
+  return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
 }

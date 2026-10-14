@@ -157,12 +157,10 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            unfolded: result.mutations.length,
-            safeWord: result.mutations[0]?.safeWord,
-            operations: lines,
-            instruction: 'These operations are pending separately now. Drop the ones you do not want with discard_pending_mutations, prepare corrected versions if needed, then call prepare_batch again — it mints a fresh safe word for the final list. The batch token is gone.',
-          }, null, 2),
+          text: [
+            `Unfolded ${result.mutations.length} operations under safe word "${result.mutations[0]?.safeWord}"; the batch token is gone.`,
+            ...lines,
+          ].join('\n'),
         }],
       };
     },
@@ -227,7 +225,15 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
       if (!items.length) {
         return { content: [{ type: 'text', text: 'No pending operations.' }] };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+      const now = Date.now();
+      const rows = items.map((item) => [
+        item.token,
+        item.action,
+        item.safeWord,
+        `${Math.max(0, Math.round((now - item.createdAt) / 1000))}s`,
+        item.preview.split('\n')[0],
+      ].join('\t'));
+      return { content: [{ type: 'text', text: ['token\taction\tsafe_word\tage\tpreview', ...rows].join('\n') }] };
     },
   );
 }
