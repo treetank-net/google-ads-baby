@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { normalizeResourceId } from '../validation.js';
-import { decodeCell, decodeEnumsDeep } from './format.js';
+import { decodeCell, decodeEnumsDeep, shortenResourceName } from './format.js';
 
 export const entitySchema = z.enum(['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links']);
 export const upperTokenSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'Use a Google Ads enum value, e.g. ENABLED, PAUSED, SEARCH, RESPONSIVE_DISPLAY_AD');
@@ -127,24 +127,21 @@ export function buildAdBlueprint(adRow: any, assetRows: any[]) {
     : responsiveSearch
       ? 'RESPONSIVE_SEARCH_AD'
       : undefined;
+  // Each text appears once, in clone_input. Per-text annotations (pinning,
+  // performance, policy) are listed only for texts that carry any, by index.
   const assetsByField = assetRows.reduce<Record<string, unknown[]>>((grouped, row) => {
     const view = row.ad_group_ad_asset_view ?? {};
     const asset = row.asset ?? {};
     const field = String(decodeCell('ad_group_ad_asset_view.field_type', view.field_type) ?? 'UNKNOWN');
+    const size = asset.image_asset?.full_size;
     grouped[field] = grouped[field] ?? [];
-    grouped[field].push({
+    grouped[field].push(compactObject({
       id: asset.id,
       name: asset.name,
       type: decodeCell('asset.type', asset.type),
-      resource_name: asset.resource_name,
-      text: asset.text_asset?.text,
-      image: asset.image_asset ? {
-        url: asset.image_asset.full_size?.url,
-        width_pixels: asset.image_asset.full_size?.width_pixels,
-        height_pixels: asset.image_asset.full_size?.height_pixels,
-      } : undefined,
-      enabled: view.enabled,
-    });
+      size: size?.width_pixels ? `${size.width_pixels}x${size.height_pixels}` : undefined,
+      enabled: view.enabled === false ? false : undefined,
+    }));
     return grouped;
   }, {});
 
@@ -167,25 +164,46 @@ export function buildAdBlueprint(adRow: any, assetRows: any[]) {
     final_url: ad.final_urls?.[0],
   } : undefined;
 
-  return decodeEnumsDeep({
-    campaign: adRow.campaign,
+  const source = responsiveSearch ?? responsiveDisplay ?? {};
+  const textNotes = (['headlines', 'descriptions'] as const).flatMap((field) =>
+    (source[field] ?? []).map((item: any, index: number) => compactObject({
+      field,
+      index,
+      pinned_field: item.pinned_field,
+      asset_performance_label: item.asset_performance_label,
+      approval_status: item.policy_summary_info?.approval_status,
+      review_status: item.policy_summary_info?.review_status,
+    })).filter((note: Record<string, unknown>) => Object.keys(note).length > 2),
+  );
+
+  return decodeEnumsDeep(compactObject({
+    campaign: compactObject({
+      id: adRow.campaign?.id,
+      name: adRow.campaign?.name,
+      status: adRow.campaign?.status,
+      advertising_channel_type: adRow.campaign?.advertising_channel_type,
+      advertising_channel_sub_type: adRow.campaign?.advertising_channel_sub_type,
+    }),
     ad_group: adRow.ad_group,
-    ad_group_ad: {
-      resource_name: adRow.ad_group_ad?.resource_name,
-      status: adRow.ad_group_ad?.status,
-    },
-    ad: {
+    ad: compactObject({
       id: ad.id,
-      resource_name: ad.resource_name,
-      type: ad.type,
-      type_hint: typeHint,
+      ad_group_ad: adRow.ad_group_ad?.resource_name ? shortenResourceName(adRow.ad_group_ad.resource_name) : undefined,
+      status: decodeCell('ad_group_ad.status', adRow.ad_group_ad?.status),
+      type: ad.type ?? typeHint,
       final_urls: ad.final_urls,
-      responsive_search_ad: responsiveSearch,
-      responsive_display_ad: responsiveDisplay,
-    },
-    assets_by_field: assetsByField,
+    }),
     clone_input: cloneInput,
-  });
+    text_notes: textNotes,
+    assets_by_field: assetsByField,
+  }));
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) =>
+    item !== undefined && item !== null && item !== ''
+    && !(Array.isArray(item) && item.length === 0)
+    && !(typeof item === 'object' && !Array.isArray(item) && Object.keys(item as object).length === 0),
+  )) as Partial<T>;
 }
 
 export function buildAdQuery(filter: string) {

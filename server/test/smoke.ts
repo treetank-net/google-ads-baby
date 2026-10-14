@@ -877,17 +877,20 @@ function testFormat() {
   assert('blueprint decodes campaign status', blueprint.campaign.status === 'PAUSED');
   assert('blueprint decodes channel type', blueprint.campaign.advertising_channel_type === 'SEARCH');
   assert('blueprint decodes ad group status and type', blueprint.ad_group.status === 'ENABLED' && blueprint.ad_group.type === 'SEARCH_STANDARD');
-  assert('blueprint decodes ad status', blueprint.ad_group_ad.status === 'PAUSED');
+  assert('blueprint decodes ad status', blueprint.ad.status === 'PAUSED');
   assert('blueprint decodes ad type', blueprint.ad.type === 'RESPONSIVE_SEARCH_AD');
-  const headline = blueprint.ad.responsive_search_ad.headlines[0];
-  assert('blueprint decodes asset performance label', headline.asset_performance_label === 'PENDING');
-  assert('blueprint decodes policy approval status', headline.policy_summary_info.approval_status === 'APPROVED');
-  assert('blueprint decodes policy review status', headline.policy_summary_info.review_status === 'REVIEWED');
-  assert('blueprint decodes the pinned field', headline.pinned_field === 'HEADLINE_1');
-  assert('blueprint keeps headline text intact', headline.text === 'One');
+  assert('blueprint shortens the ad_group_ad resource name', blueprint.ad.ad_group_ad === '2~3');
+  const note = blueprint.text_notes[0];
+  assert('blueprint annotates the headline by index', note.field === 'headlines' && note.index === 0 && blueprint.text_notes.length === 1);
+  assert('blueprint decodes asset performance label', note.asset_performance_label === 'PENDING');
+  assert('blueprint decodes policy approval status', note.approval_status === 'APPROVED');
+  assert('blueprint decodes policy review status', note.review_status === 'REVIEWED');
+  assert('blueprint decodes the pinned field', note.pinned_field === 'HEADLINE_1');
+  assert('blueprint keeps headline text in the clone input', blueprint.clone_input.headlines[0] === 'One');
+  const serialized = JSON.stringify(blueprint);
+  assert('blueprint carries each text once', serialized.split('"One"').length - 1 === 1, serialized);
   assert('blueprint groups assets by decoded field type', blueprint.assets_by_field.HEADLINE?.[0].type === 'TEXT', Object.keys(blueprint.assets_by_field).join(','));
   assert('blueprint leaves the clone input untouched', blueprint.clone_input.tool === 'prepare_responsive_search_ad');
-  assert('blueprint keeps the type hint', blueprint.ad.type_hint === 'RESPONSIVE_SEARCH_AD');
 
   // The resource name ends in the asset id, not the field type, so parsing its last segment
   // grouped every asset under its own numeric key. field_type is the only correct source.
