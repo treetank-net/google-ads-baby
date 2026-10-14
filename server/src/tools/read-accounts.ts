@@ -93,7 +93,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       try {
         const cid = normalizeCustomerId(customer_id);
         const [rows, currency] = await Promise.all([executeGaql(cfg, cid, query), getAccountCurrency(cfg, cid)]);
-        if (format === 'json') {
+        if (format === 'json' && shape.output !== 'file') {
           const decoded = (rows as unknown[]).map((row) => decodeEnumsDeep(row));
           const slice = paginate(decoded, shape.page ?? 1, Math.min(shape.page_chars ?? 12_000, MAX_TABLE_PAGE_CHARS), (page) => JSON.stringify(page));
           const note = pageNote(slice, 'rows');
@@ -164,8 +164,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       limit: shapeSchemas.limit,
       page: shapeSchemas.page,
       page_chars: shapeSchemas.page_chars,
+      output: shapeSchemas.output,
     },
-    async ({ fields, order_by, limit, page, page_chars, ...input }) => {
+    async ({ fields, order_by, limit, page, page_chars, output, ...input }) => {
       const validationError = requireCustomerId(input.customer_id);
       if (validationError) {
         return { content: [{ type: 'text', text: `Error: ${validationError}` }] };
@@ -180,7 +181,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
           scope: [`customer ${cid}`],
           currency,
           rows: normalizeRows(rows),
-          shape: { fields, order_by, limit, page, page_chars },
+          shape: { fields, order_by, limit, page, page_chars, output },
           extraNotes: rows.length >= MAX_FETCH_LIMIT ? [`fetched the API maximum of ${MAX_FETCH_LIMIT} rows; narrow with campaign_id, ad_group_id, status or name_contains`] : [],
         });
         return { content: [{ type: 'text', text }] };

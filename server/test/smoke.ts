@@ -368,6 +368,22 @@ function testTable() {
   assert('a multi-page table says how to get more', /# page 1\/\d+, rows 1-\d+ of 2000; page: 2 for more/.test(paged));
   const page2 = tableDocument({ title: 'terms', rows: many, defaultOrder: '-cost', shape: { page: 2 } });
   assert('page 2 continues where page 1 stopped', !page2.includes('term number 1999 ') && page2.includes('# page 2/'));
+
+  const previousData = process.env.GOOGLE_ADS_BABY_DATA;
+  process.env.GOOGLE_ADS_BABY_DATA = mkdtempSync(join(tmpdir(), 'gab-export-'));
+  try {
+    const exported = tableDocument({ title: 'terms', rows: many, defaultOrder: '-cost', shape: { output: 'file', min_clicks: 1 } });
+    const fileMatch = exported.match(/file=(\S+\.tsv)/);
+    assert('file mode names the written file', Boolean(fileMatch) && exported.includes('# columns: search_term cost clicks'), exported.slice(0, 300));
+    assert('file mode returns a short response', exported.length < 1500 && exported.split('\n').filter((line) => !line.startsWith('#')).length === 6, `chars=${exported.length}`);
+    const file = readFileSync(fileMatch![1], 'utf8').trimEnd().split('\n');
+    const matching = many.filter((row) => (row.clicks as number) >= 1).length;
+    assert('the file holds every matching row, unpaged, with one header line', file.length === matching + 1 && file[0] === 'search_term\tcost\tclicks', `lines=${file.length}`);
+    assert('the file has no comment lines', file.every((line) => !line.startsWith('#')));
+    assert('file mode keeps the header row count', exported.includes(`rows=${matching}`));
+  } finally {
+    if (previousData === undefined) delete process.env.GOOGLE_ADS_BABY_DATA; else process.env.GOOGLE_ADS_BABY_DATA = previousData;
+  }
 }
 
 function testReportRendering() {

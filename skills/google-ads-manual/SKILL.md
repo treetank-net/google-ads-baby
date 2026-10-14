@@ -57,10 +57,38 @@ campaign_id	campaign	campaign_status	budget	impressions	clicks	ctr_pct	cost	...
 | `min_cost` / `min_impressions` / `min_clicks` | Drop rows below a threshold |
 | `summary: true` | Header and totals only, no rows |
 | `page` / `page_chars` | Next slice; default page is about 12k chars |
+| `output: "file"` | All rows to a TSV file; see File output |
 
 For example, the 10 most expensive campaigns with spend:
 `get_campaigns(customer_id, min_cost: 1, order_by: "-cost", limit: 10, fields: ["campaign","cost","conversions","cpa"])`.
 An unknown column name returns an error listing the available columns.
+
+### File output (large tables)
+
+`output: "file"` writes **every** row that passes `min_*`, `order_by`, `limit` and
+`fields` to a TSV file and returns only the header, `# columns: ...`, totals and
+the first 5 rows. Paging does not apply. Use it when a table would take more than
+one page (hundreds of ads, keywords or search terms), or when you will join,
+group or rank the data yourself. In hosts without a shell (Claude Desktop) stay inline.
+
+The file format is fixed so it parses without guessing:
+- UTF-8, path `~/.google-ads-baby/exports/<table>-<timestamp>.tsv` (from `file=` in the response).
+- Line 1 is the column names (same short names as inline), then one row per line.
+- Tab-delimited, no quoting, no `#` lines. Tabs and newlines inside values are replaced by spaces.
+- Empty cell means no value. Numbers use `.` and no thousands separator. Money is in the account
+  currency (from `currency=` in the response); `*_pct` are percents.
+- Constant columns stay in the file (they are not hoisted), so joins and filters work.
+
+Parse it with standard tools:
+```bash
+F=/path/from/response.tsv
+column -t -s $'\t' "$F" | head                                    # look
+awk -F'\t' 'NR>1 && $3>100 {print $1, $3}' "$F"                   # filter by column number
+duckdb -c "SELECT campaign, sum(cost) c FROM read_csv('$F', delim='\t', header=true) GROUP BY 1 ORDER BY c DESC LIMIT 20"
+mlr --itsv --opprint sort -nr cost then head -n 20 "$F"
+python3 -c "import csv,sys; r=csv.DictReader(open(sys.argv[1]), delimiter='\t', quoting=csv.QUOTE_NONE); print(sum(float(x['cost'] or 0) for x in r))" "$F"
+```
+Print only the aggregate you need; do not `cat` the whole file back into context.
 
 `list_ads_entities` notes:
 - `negative_keywords` returns campaign-level negatives. With `ad_group_id` it returns that ad group's negatives instead.

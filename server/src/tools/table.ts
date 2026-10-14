@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getConfigDir } from '../config.js';
 import { z } from 'zod';
 import { enums, fields } from 'google-ads-api';
 import { decodeCell, flattenRow, shortenResourceName } from './format.js';
@@ -150,6 +153,7 @@ export const shapeSchemas = {
   summary: z.boolean().optional().describe('Totals and row count only'),
   page: z.number().int().positive().optional(),
   page_chars: z.number().int().min(MIN_TABLE_PAGE_CHARS).max(MAX_TABLE_PAGE_CHARS).optional(),
+  output: z.enum(['inline', 'file']).optional().describe('file: all rows to a TSV file; returns path, totals and 5 rows'),
 };
 
 export interface Shape {
@@ -162,6 +166,7 @@ export interface Shape {
   summary?: boolean;
   page?: number;
   page_chars?: number;
+  output?: 'inline' | 'file';
 }
 
 export interface Shaped {
@@ -333,6 +338,7 @@ export function tableDocument(spec: TableSpec): string {
   }
   for (const note of spec.extraNotes ?? []) lines.push(`# ${note}`);
   if (shape.summary) return lines.join('\n');
+  if (shape.output === 'file') return fileDocument(spec.title, shaped, lines);
 
   const paged = pageRows(shaped.rows, layout.columns, shape.page ?? 1, shape.page_chars ?? DEFAULT_TABLE_PAGE_CHARS);
   const body = renderRows(paged.rows, layout.columns);
@@ -341,6 +347,27 @@ export function tableDocument(spec: TableSpec): string {
     const to = paged.from + paged.rows.length - 1;
     lines.push(`# page ${paged.page}/${paged.pages}, rows ${paged.from}-${to} of ${shaped.rows.length}${paged.page < paged.pages ? `; page: ${paged.page + 1} for more` : ''}`);
   }
+  return lines.join('\n');
+}
+
+export const FILE_PREVIEW_ROWS = 5;
+
+/**
+ * output: "file" — every shaped row (filters, order, limit and fields still apply,
+ * paging does not) goes to a plain TSV file: one header line of column names,
+ * then rows; no `#` lines, no hoisted columns, so any TSV reader parses it as is.
+ */
+function fileDocument(title: string, shaped: Shaped, head: string[]): string {
+  const columns = shaped.columns.filter((column) => shaped.rows.some((row) => row[column] !== undefined && row[column] !== ''));
+  const dir = join(getConfigDir(), 'exports');
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${title.replace(/[^a-z0-9_-]+/gi, '_')}-${new Date().toISOString().replace(/[:.]/g, '-')}.tsv`);
+  writeFileSync(path, `${renderRows(shaped.rows, columns)}\n`, 'utf8');
+  const lines = [...head];
+  lines[0] = `${lines[0].replace(/ · rows=\d+/, '')} · rows=${shaped.rows.length} · file=${path}`;
+  lines.splice(1, 0, `# columns: ${columns.join(' ')}`);
+  const preview = renderRows(shaped.rows.slice(0, FILE_PREVIEW_ROWS), columns);
+  if (preview) lines.push(preview);
   return lines.join('\n');
 }
 
