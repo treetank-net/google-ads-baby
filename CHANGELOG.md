@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.25.0
+
+### Added
+- **`output: "file"`** on `get_campaigns`, `execute_gaql` and `list_ads_entities`: every shaped row goes to `~/.google-ads-baby/exports/<table>-<timestamp>.tsv` (plain TSV: header line, tab-delimited, no quoting, no `#` lines); the response is the header, column list, totals and 5 preview rows. `list_ads_entities` fetches up to 50,000 rows in file mode. The `google-ads-manual` skill documents the format with awk/duckdb/mlr/python examples.
+
 ## v0.24.0
 
 ### Changed — token diet (see marketing-context-mcp `docs/response-format-contract.md`)
