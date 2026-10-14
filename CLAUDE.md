@@ -107,27 +107,35 @@ jest tym, co pilnuje reszty. Instrukcje serwera muszą być spójne z profilem: 
 nie wolno reklamować toolów, których nie zarejestrowano.
 
 **Nie obcinaj — paginuj:**
-Read tool, który może zwrócić dużo wierszy, **nie** obcina wyniku do stałej liczby. Przepuszcza
-go przez `paginate()` (`tools/format.ts`) i dokłada `pageNote()` do nagłówka. Podział liczy się
+Read tool, który może zwrócić dużo wierszy, **nie** obcina wyniku po cichu. Tabele idą przez
+`tableDocument()` (paginacja wbudowana, `limit` tylko na życzenie modelu i zawsze ogłoszony w nagłówku),
+findings przez `paginate()` + `pageNote()` (`tools/format.ts`). Podział liczy się
 z **realnego rozmiaru wyrenderowanej strony**, nie z liczby wierszy — wiersz `list_ads_entities(ads)`
 kosztuje ~54 tokeny, a `get_ad_creatives` w meta ~160, więc stała liczba wierszy raz przekracza
 budżet, raz go marnuje. `paginate()` przyjmuje renderer (`toTsv` domyślnie, `JSON.stringify` dla
 `findings`), bo strona musi mieścić się w budżecie w formacie, w którym naprawdę wyjdzie.
-Parametr `limit` w `list_ads_entities` to **granica pobrania z API**, nie wyświetlania — nazwa
-i opis muszą to mówić, bo `customer.query()` paginuje wewnętrznie i `LIMIT` w GAQL był naszym
-obcinaniem, nie ograniczeniem Google'a. Sortowanie przed paginacją jest obowiązkowe tam, gdzie
+`list_ads_entities` pobiera do `MAX_FETCH_LIMIT` (5000) wierszy i mówi w nagłówku, gdy w nią trafi;
+`limit` to od 0.24 top-N wyświetlania jak w każdym toolu tabelarycznym (kontrakt), nie granica pobrania. Sortowanie przed paginacją jest obowiązkowe tam, gdzie
 istnieje ważność (`sortFindings` po severity, `rankAudienceCoverage` po liczbie kampanii) — strona 1
 musi nieść to, co najważniejsze.
 
-**Format odpowiedzi read toolów — TSV, nie JSON:**
-Każdy read tool zwracający **listę wierszy** musi przechodzić przez `tsvDocument()` / `toTsv()`
-(`tools/format.ts`), nie przez `JSON.stringify`. JSON pretty-print powtarza nazwy kluczy raz na
-wiersz — zmierzone na żywym koncie: `list_ads_entities(ads)` przy 50 wierszach kosztował 16 150
-tokenów w JSON i 2 715 w TSV. `toTsv()` dodatkowo obcina prefiks `customers/123/...` do samego ID,
-dekoduje enumy (`ENUM_COLUMNS`) i skleja pola powtarzalne separatorem ` ~ ` (**nie** `|` — nazwy
-kampanii na kontach klienta zawierają `|`). Nowa kolumna enumowa musi trafić do `ENUM_COLUMNS`,
-inaczej model zobaczy liczbę. JSON zostaje dla struktur **semantycznych**, nie tabelarycznych:
-`findings`, `preview`, `get_ad_blueprint`.
+**Format odpowiedzi read toolów — `tableDocument()`, nie JSON:**
+Read tool zwracający listę wierszy przepuszcza surowe wiersze GAQL przez `normalizeRows()`, a potem
+przez `tableDocument()` (`tools/table.ts`), zgodnie z `marketing-context-mcp/docs/response-format-contract.md`.
+JSON pretty-print powtarza klucze w każdym wierszu: `list_ads_entities(ads)` przy 50 wierszach
+kosztował 16 150 tokenów w JSON i 2 715 w TSV.
+- `normalizeRows()` skraca nazwy kolumn (`metrics.cost_micros` → `cost`, `campaign.id` → `campaign_id`,
+  aliasy w `COLUMN_ALIASES`) i przelicza micros na walutę. Ratio zamienia na `*_pct`. Enumy dekoduje
+  z mapy biblioteki (`fields.enumFields`, ~435 pól), a nieznaną wartość pokazuje jako `UNKNOWN(n)`.
+- `tableDocument()` usuwa puste kolumny i przenosi stałe do nagłówka `# k=v`. Sumy liczy po wszystkich
+  pasujących wierszach. Obsługuje parametry `fields`/`order_by`/`limit`/`min_*`/`summary` (`shapeSchemas`)
+  i stronę 12k znaków.
+- Nieznana kolumna rzuca `ShapeError`, a handler zamienia ją na komunikat przez `tableError()`.
+- Nowa kolumna micros bez sufiksu `_micros` (np. `average_cpc`) musi trafić do `MICROS_LEAVES`, inaczej
+  wyjdzie w micros.
+- Stare `toTsv()`/`tsvDocument()` (`format.ts`) zostały tylko w toolach analitycznych.
+
+JSON zostaje dla struktur semantycznych, nie tabelarycznych: `findings`, `preview`, `get_ad_blueprint`.
 
 **Kwoty tylko w walucie konta — nigdy „PLN" na sztywno:**
 Micros z Google Ads są w walucie konta, a MCC ma konta w EUR/CZK/HUF. Zahardkodowane „500 PLN"

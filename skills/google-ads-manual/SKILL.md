@@ -22,11 +22,51 @@ EUR or HUF account.
 | Before building ads | `get_build_context`: campaigns, ad groups, enabled conversion actions and reusable image assets in one call |
 | One ad in full, ready to clone | `get_ad_blueprint` |
 
+### Reading table output
+
+`get_campaigns`, `execute_gaql`, `list_ads_entities`, `list_accounts` and
+`get_build_context` return the same TSV layout:
+
+```
+# campaigns · customer 123 · last 30d · currency=PLN · rows=3 · by -cost
+# channel=SEARCH                         <- columns constant across all rows
+# totals: impressions=168215 clicks=8121 cost=13421.11 conversions=253.5
+campaign_id	campaign	campaign_status	budget	impressions	clicks	ctr_pct	cost	...
+```
+
+- **Column names** are short: `metrics.` and `segments.` are dropped,
+  `_micros` is dropped (the value is converted), and `id`, `name`, `status` and
+  `type` keep their entity (`campaign_id`, `campaign`, `ad_group_status`).
+  Aliases: `channel`, `bidding`, `budget`, `keyword`, `match_type`,
+  `search_term`, `conv_value`, `cpa`, `avg_cpc`, `search_is_pct`,
+  `search_lost_is_budget_pct`, `search_lost_is_rank_pct`.
+- **Units.** Money is in the account currency with 2 decimals. Ratios are
+  percents (`ctr_pct` 10.62 means 10.62%). Enums are names, and a value the
+  library does not know shows as `UNKNOWN(n)`.
+- **Header lines.** Columns empty in every row are dropped. Columns with one
+  value across all rows move to a `# k=v` header line. Totals sum every row that
+  passed the filters, including rows that `limit` cut.
+
+### Shaping output (prefer this to paging)
+
+| Param | Effect |
+|---|---|
+| `fields` | Only these columns (by short name) |
+| `order_by` | Sort column; `-cost` is descending |
+| `limit` | Top-N after filtering and sorting |
+| `min_cost` / `min_impressions` / `min_clicks` | Drop rows below a threshold |
+| `summary: true` | Header and totals only, no rows |
+| `page` / `page_chars` | Next slice; default page is about 12k chars |
+
+For example, the 10 most expensive campaigns with spend:
+`get_campaigns(customer_id, min_cost: 1, order_by: "-cost", limit: 10, fields: ["campaign","cost","conversions","cpa"])`.
+An unknown column name returns an error listing the available columns.
+
 `list_ads_entities` notes:
 - `negative_keywords` returns campaign-level negatives. With `ad_group_id` it returns that ad group's negatives instead.
 - `type` filters the channel, ad or asset type. For keywords it filters the match type (EXACT, PHRASE, BROAD).
 - `status` takes TRUE or FALSE for `ad_asset_links`.
-- `limit` caps the API fetch (default 2000, max 5000). Display is paged separately.
+- It fetches up to 5000 rows. `limit` is the top-N shown, and the header says when the fetch hit 5000.
 
 `execute_gaql` with `format: json` returns raw rows that are several times
 larger than TSV. Use it only when you need nested structures that TSV flattens

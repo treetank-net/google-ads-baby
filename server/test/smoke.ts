@@ -85,6 +85,7 @@ import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
 import { registerAuthTools } from '../src/tools/auth.js';
 import { compactToolListing, compactSchema } from '../src/tools/compact-listing.js';
+import { columnName, normalizeRows, shapeRows, tableDocument, layoutFor, ShapeError, DEFAULT_TABLE_PAGE_CHARS } from '../src/tools/table.js';
 import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
 import { PLUGIN_VERSION } from '../src/constants.js';
 import { mkdtempSync, readFileSync } from 'fs';
@@ -309,6 +310,63 @@ async function testToolListingBudget() {
   for (const tool of tools) paramDescriptions(tool.inputSchema, tool.name, params);
   const longParams = params.filter(([, text]) => text.length > PARAM_DESCRIPTION_BUDGET).map(([path, text]) => `${path} (${text.length})`);
   assert(`every parameter description is at most ${PARAM_DESCRIPTION_BUDGET} chars`, longParams.length === 0, longParams.join(', '));
+}
+
+function testTable() {
+  console.log('\n--- Table format ---');
+
+  assert('metric prefix is dropped', columnName('metrics.clicks') === 'clicks');
+  assert('micros suffix is dropped', columnName('metrics.cost_micros') === 'cost' && columnName('ad_group.cpc_bid_micros') === 'cpc_bid');
+  assert('generic leaves keep their parent', columnName('campaign.id') === 'campaign_id' && columnName('ad_group.status') === 'ad_group_status');
+  assert('a name leaf becomes the entity name', columnName('campaign.name') === 'campaign' && columnName('asset.name') === 'asset');
+  assert('ratios are renamed as percents', columnName('metrics.ctr') === 'ctr_pct' && columnName('metrics.absolute_top_impression_percentage') === 'absolute_top_impression_pct');
+
+  const raw = [
+    { campaign: { resource_name: 'customers/1/campaigns/11', id: 11, name: 'Brand', status: 2, advertising_channel_type: 2 }, campaign_budget: { amount_micros: 150000000 }, metrics: { impressions: 1000, clicks: 100, ctr: 0.1, cost_micros: 44102300, conversions: 4, conversions_value: 912.345, average_cpc: 441023 }, segments: { device: 2 } },
+    { campaign: { resource_name: 'customers/1/campaigns/12', id: 12, name: 'Generic', status: 2, advertising_channel_type: 2 }, campaign_budget: { amount_micros: 50000000 }, metrics: { impressions: 0, clicks: 0, ctr: 0, cost_micros: 0, conversions: 0, conversions_value: 0, average_cpc: 0 }, segments: { device: 4 } },
+    { campaign: { resource_name: 'customers/1/campaigns/13', id: 13, name: 'PMax', status: 3, advertising_channel_type: 10 }, campaign_budget: { amount_micros: 80000000 }, metrics: { impressions: 500, clicks: 20, ctr: 0.04, cost_micros: 120000000, conversions: 1.5, conversions_value: 300, average_cpc: 6000000 }, segments: { device: 2 } },
+  ];
+  const rows = normalizeRows(raw);
+  assert('resource names never become a column', !Object.keys(rows[0]).some((k) => k.includes('resource')));
+  assert('micros become currency units with 2 decimals', rows[0].cost === 44.1 && rows[0].budget === 150 && rows[0].avg_cpc === 0.44);
+  assert('ratios become percents', rows[0].ctr_pct === 10 && rows[2].ctr_pct === 4);
+  assert('enums are decoded from the library field map, beyond the hand-kept list', rows[0].device === 'MOBILE' && rows[1].device === 'DESKTOP');
+  assert('status and channel enums are decoded', rows[0].campaign_status === 'ENABLED' && rows[2].campaign_status === 'PAUSED' && rows[2].channel === 'PERFORMANCE_MAX');
+  assert('other floats keep 2 decimals and never lose integer digits', rows[0].conv_value === 912.35 && normalizeRows([{ metrics: { conversions_value: 91234.5, conversions: 1 / 3 } }])[0].conv_value === 91234.5);
+  assert('small floats keep 3 significant digits', normalizeRows([{ metrics: { conversions: 0.000123456 } }])[0].conversions === 0.000123);
+  const unknown = normalizeRows([{ campaign: { status: 99 } }]);
+  assert('an unmapped enum value is labelled, not shown as a bare number', unknown[0].campaign_status === 'UNKNOWN(99)');
+
+  const byCost = shapeRows(rows, { order_by: '-cost', limit: 2 });
+  assert('order_by sorts descending with a - prefix', byCost.rows[0].campaign === 'PMax' && byCost.rows[1].campaign === 'Brand');
+  assert('totals cover every matching row, not just the shown ones', byCost.totals.cost === 164.1 && byCost.totals.clicks === 120);
+  assert('limit truncation is declared', byCost.notes.some((n) => n.includes('top 2 of 3')));
+  const spending = shapeRows(rows, { min_cost: 1 });
+  assert('min_cost drops zero-activity rows', spending.rows.length === 2 && spending.matched === 2 && spending.total === 3);
+  const picked = shapeRows(rows, { fields: ['campaign', 'cost'] });
+  assert('fields selects columns', Object.keys(picked.rows[0]).join(',') === 'campaign,cost');
+  let unknownColumn = '';
+  try { shapeRows(rows, { order_by: 'spend' }); } catch (err) { if (err instanceof ShapeError) unknownColumn = err.message; }
+  assert('an unknown column names the available ones', unknownColumn.includes('Available:') && unknownColumn.includes('cost'));
+
+  const layout = layoutFor(rows.filter((r) => r.campaign_status === 'ENABLED'), Object.keys(rows[0]));
+  assert('a column constant across rows is hoisted to the header', layout.constants.channel === 'SEARCH' && !layout.columns.includes('channel'));
+
+  const doc = tableDocument({ title: 'campaigns', scope: ['customer 1', 'last 30d'], currency: 'PLN', rows, defaultOrder: '-cost' });
+  const lines = doc.split('\n');
+  assert('the header names scope, currency and order', lines[0].startsWith('# campaigns · customer 1 · last 30d · currency=PLN') && lines[0].includes('by -cost'));
+  assert('totals are printed once in the header', doc.includes('# totals: impressions=1500 clicks=120 cost=164.1'));
+  assert('no per-response legend', !doc.includes('tab-separated'));
+  assert('headers are short names, not dotted API paths', !doc.includes('metrics.') && doc.includes('\tcost\t'));
+  const summary = tableDocument({ title: 'campaigns', rows, shape: { summary: true } });
+  assert('summary returns header and totals only', !summary.includes('\tcost\t') && summary.includes('totals'));
+
+  const many = normalizeRows(Array.from({ length: 2000 }, (_, i) => ({ search_term_view: { search_term: `term number ${i} with some words` }, metrics: { cost_micros: (i + 1) * 10000, clicks: i % 7 } })));
+  const paged = tableDocument({ title: 'terms', rows: many, defaultOrder: '-cost' });
+  assert('the default page stays near the 12k budget', paged.length <= DEFAULT_TABLE_PAGE_CHARS + 600, `chars=${paged.length}`);
+  assert('a multi-page table says how to get more', /# page 1\/\d+, rows 1-\d+ of 2000; page: 2 for more/.test(paged));
+  const page2 = tableDocument({ title: 'terms', rows: many, defaultOrder: '-cost', shape: { page: 2 } });
+  assert('page 2 continues where page 1 stopped', !page2.includes('term number 1999 ') && page2.includes('# page 2/'));
 }
 
 function testProfiles() {
@@ -1247,6 +1305,7 @@ async function main() {
   await testAuthFlow();
   testAnalysis();
   testFormat();
+  testTable();
   testEntityQueries();
   testCampaignListing();
   testPagination();
