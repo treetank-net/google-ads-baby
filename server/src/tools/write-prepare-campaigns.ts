@@ -60,12 +60,12 @@ import { resolveTargeting } from './targeting.js';
 export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
     'prepare_campaign_status',
-    'Prepare a campaign status change (enable/pause). Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Enable or pause a campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      campaign_id: z.string().describe('Campaign ID'),
-      campaign_name: z.string().describe('Campaign name (for preview)'),
-      new_status: z.enum(['ENABLED', 'PAUSED']).describe('Target status'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      campaign_name: z.string(),
+      new_status: z.enum(['ENABLED', 'PAUSED']),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, campaign_name, new_status, safe_word }) => {
@@ -82,10 +82,10 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_removal',
-    'Prepare removal of one or more campaigns. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Remove campaigns.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      campaigns: z.array(campaignRefSchema).min(1).max(20).describe('Campaigns to remove'),
+      customer_id: z.string(),
+      campaigns: z.array(campaignRefSchema).min(1).max(20),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaigns, safe_word }) => {
@@ -110,13 +110,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_budget_change',
-    'Prepare a campaign budget change. Reads the current amount from the account, so the preview shows the real before -> after, and warns when the budget is shared by several campaigns. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Change a campaign budget; the preview reads the current amount and flags shared budgets.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      budget_id: z.string().describe('Campaign budget resource ID'),
-      campaign_name: z.string().describe('Campaign name (for preview)'),
-      current_budget_amount: z.number().optional().describe('Optional: the daily budget you believe is set now, in account currency units. The preview always uses the amount read from the account; a mismatch is reported as a warning.'),
-      new_budget_amount: z.number().describe('New daily budget in account currency units (see list_accounts)'),
+      customer_id: z.string(),
+      budget_id: z.string().describe('Campaign budget ID'),
+      campaign_name: z.string(),
+      current_budget_amount: z.number().optional().describe('Optional: the amount you believe is set; a mismatch is warned'),
+      new_budget_amount: z.number(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, budget_id, campaign_name, current_budget_amount, new_budget_amount, safe_word }) => {
@@ -150,16 +150,16 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_update',
-    'Prepare an update to an existing campaign (name, status, daily budget, bidding strategy). Reads the current values first and previews them as before -> after, including a warning when the budget is shared. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Update campaign name, status, daily budget or bidding; preview shows before -> after.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      name: z.string().min(1).optional().describe('New campaign name'),
-      status: entityStatusSchema.optional().describe('New campaign status'),
-      daily_budget_amount: z.number().positive().optional().describe('New daily budget in account currency units (see list_accounts); capped by server safety limit. Applies to the budget resource linked to this campaign, which may be shared with other campaigns.'),
-      strategy_type: biddingStrategyTypeSchema.optional().describe('New bidding strategy type'),
-      target_cpa_amount: z.number().positive().optional().describe('Target CPA in account currency units (see list_accounts), required for TARGET_CPA; capped by server safety limit'),
-      target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400%; required for TARGET_ROAS'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      name: z.string().min(1).optional(),
+      status: entityStatusSchema.optional(),
+      daily_budget_amount: z.number().positive().optional().describe('Applies to the linked budget, which may be shared'),
+      strategy_type: biddingStrategyTypeSchema.optional(),
+      target_cpa_amount: z.number().positive().optional().describe('Required for TARGET_CPA'),
+      target_roas: targetRoasSchema.optional().describe('Multiplier, 4.0 = 400%. Required for TARGET_ROAS'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, name, status, daily_budget_amount, strategy_type, target_cpa_amount, target_roas, safe_word }) => {
@@ -236,11 +236,11 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_search_campaign',
-    'Prepare creation of a paused Search campaign with a daily budget. Returns a preview and confirmation token.',
+    'Create an empty paused Search campaign. For a whole campaign use prepare_search_campaign_full.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
+      customer_id: z.string(),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_amount, safe_word }) => {
@@ -263,46 +263,46 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_search_campaign_full',
-    'Prepare a COMPLETE Search campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad groups (each with keywords and a responsive search ad) + extensions (sitelinks/callouts/call). Optionally driven by a preset that fills sane defaults. Returns a SINGLE preview and ONE confirmation token — the user confirms once for the whole campaign. Prefer this over calling prepare_search_campaign + prepare_ad_group + prepare_keywords + ... separately; it is far faster (one model turn, one atomic API transaction, one confirm).',
+    'Create a whole Search campaign in one atomic confirm: budget, bidding, targeting, ad groups with keywords and RSAs, extensions. Preferred for new campaigns.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      preset: z.enum(['ecommerce-search', 'leadgen-search', 'none']).optional().describe('Preset filling match types (exact+phrase) and bidding. Presets never set a country or language — pass locations and languages explicitly. Omit/"none" for manual MANUAL_CPC.'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
-      final_url: z.string().url().describe('Default final URL for ads and sitelinks'),
+      customer_id: z.string(),
+      preset: z.enum(['ecommerce-search', 'leadgen-search', 'none']).optional().describe('Fills match types and bidding, never the market. Omit for MANUAL_CPC'),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
+      final_url: z.string().url().describe('Default URL for ads and sitelinks'),
       ad_groups: z.array(z.object({
-        name: z.string().min(1).describe('Ad group name'),
-        cpc_bid_amount: z.number().positive().optional().describe('CPC bid in account currency units (see list_accounts); defaults to 1.00'),
-        final_url: z.string().url().optional().describe('Overrides campaign final_url for this ad group'),
+        name: z.string().min(1),
+        cpc_bid_amount: z.number().positive().optional().describe('Default 1.00'),
+        final_url: z.string().url().optional().describe('Overrides campaign final_url'),
         keywords: z.array(z.object({
           text: z.string().min(1).max(80),
-          match_type: keywordMatchTypeSchema.optional().describe('Omit to expand per preset (default exact+phrase)'),
-        })).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords; without match_type each is expanded to exact+phrase'),
-        headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('RSA headlines: 3-15, max 30 chars each'),
-        descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('RSA descriptions: 2-4, max 90 chars each'),
-      })).min(1).max(20).describe('Ad groups; each gets its keywords and one responsive search ad'),
-      locations: z.array(z.string().min(1)).min(1).describe('Required. Countries the campaign targets, as ISO country codes such as ["PL"] or ["CZ","SK"]. A numeric geo target constant ID is also accepted for a region or city. There is no default — ask the user.'),
-      languages: z.array(z.string().min(1)).min(1).describe('Required. Languages the campaign targets, as ISO language codes such as ["pl"] or ["cs","en"]. A numeric language constant ID is also accepted. There is no default — ask the user.'),
-      positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('Default PRESENCE (recommended for local intent)'),
+          match_type: keywordMatchTypeSchema.optional().describe('Omit to expand to exact+phrase'),
+        })).min(1).max(MAX_KEYWORDS_PER_MUTATION),
+        headlines: z.array(z.string().min(1).max(30)).min(3).max(15),
+        descriptions: z.array(z.string().min(1).max(90)).min(2).max(4),
+      })).min(1).max(20),
+      locations: z.array(z.string().min(1)).min(1).describe('Required, no default: ask the user. ISO country codes or geo target constant IDs'),
+      languages: z.array(z.string().min(1)).min(1).describe('Required, no default: ask the user. ISO language codes or language constant IDs'),
+      positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('Default PRESENCE'),
       bidding: z.object({
         type: z.enum(['MANUAL_CPC', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'TARGET_CPA', 'TARGET_ROAS']),
-        target_cpa_amount: z.number().positive().optional().describe('Required for TARGET_CPA; optional tCPA for MAXIMIZE_CONVERSIONS'),
-        target_roas: z.number().positive().max(50).optional().describe('Multiplier, e.g. 4.0 = 400% (NOT a percent). Required for TARGET_ROAS.'),
-      }).optional().describe('Overrides preset bidding'),
+        target_cpa_amount: z.number().positive().optional().describe('Required for TARGET_CPA, optional for MAXIMIZE_CONVERSIONS'),
+        target_roas: z.number().positive().max(50).optional().describe('Multiplier, 4.0 = 400%. Required for TARGET_ROAS'),
+      }).optional(),
       campaign_negative_keywords: z.array(z.object({
         text: z.string().min(1).max(80),
-        match_type: keywordMatchTypeSchema.optional().describe('Defaults to PHRASE'),
-      })).max(MAX_KEYWORDS_PER_MUTATION).optional().describe('Campaign-level negative keywords'),
+        match_type: keywordMatchTypeSchema.optional().describe('Default PHRASE'),
+      })).max(MAX_KEYWORDS_PER_MUTATION).optional(),
       sitelinks: z.array(z.object({
         link_text: z.string().min(1).max(25),
         description1: z.string().max(35).optional(),
         description2: z.string().max(35).optional(),
-        final_url: z.string().url().optional().describe('Defaults to campaign final_url'),
+        final_url: z.string().url().optional().describe('Default: campaign final_url'),
       })).max(20).optional(),
       callouts: z.array(z.string().min(1).max(25)).max(20).optional(),
       call: z.object({
-        country_code: z.string().describe('ISO country code, e.g. PL'),
-        phone_number: z.string().describe('Phone number'),
+        country_code: z.string().describe('ISO, e.g. PL'),
+        phone_number: z.string(),
       }).optional(),
       safe_word: safeWordSchema,
     },
@@ -355,22 +355,22 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_display_campaign_full',
-    'Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad group + one responsive display ad (using existing uploaded image asset IDs). Returns a SINGLE preview and ONE confirmation token. Prefer this over separate prepare_display_campaign + prepare_display_ad_group + prepare_responsive_display_ad calls.',
+    'Create a whole Display campaign in one confirm: budget, bidding, targeting, ad group, responsive display ad from existing images.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
+      customer_id: z.string(),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
       bidding: z.object({
         type: z.enum(['MANUAL_CPC', 'MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE', 'TARGET_CPA', 'TARGET_ROAS']),
         target_cpa_amount: z.number().positive().optional(),
-        target_roas: z.number().positive().max(50).optional().describe('Multiplier, e.g. 4.0 = 400%'),
-      }).optional().describe('Defaults to MANUAL_CPC'),
-      locations: z.array(z.string().min(1)).min(1).describe('Required. Countries as ISO codes such as ["PL"] or ["CZ","SK"], or numeric geo target constant IDs. There is no default — ask the user.'),
-      languages: z.array(z.string().min(1)).min(1).describe('Required. Languages as ISO codes such as ["pl"] or ["cs","en"], or numeric language constant IDs. There is no default — ask the user.'),
+        target_roas: z.number().positive().max(50).optional().describe('Multiplier, 4.0 = 400%'),
+      }).optional().describe('Default MANUAL_CPC'),
+      locations: z.array(z.string().min(1)).min(1).describe('Required, no default: ask the user. ISO country codes or geo target constant IDs'),
+      languages: z.array(z.string().min(1)).min(1).describe('Required, no default: ask the user. ISO language codes or language constant IDs'),
       positive_geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional(),
       ad_group: z.object({
         name: z.string().min(1),
-        cpc_bid_amount: z.number().positive().optional().describe('Defaults to 1.00'),
+        cpc_bid_amount: z.number().positive().optional().describe('Default 1.00'),
         optimized_targeting_enabled: z.boolean().optional(),
       }),
       ad: z.object({
@@ -379,9 +379,9 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
         long_headline: z.string().min(1).max(90),
         descriptions: z.array(z.string().min(1).max(90)).min(1).max(5),
         final_url: z.string().url(),
-        marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('Existing image asset IDs (1.91:1)'),
-        square_marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('Existing square image asset IDs (1:1)'),
-        logo_image_asset_ids: z.array(z.string().regex(/^\d+$/)).max(5).describe('Existing logo asset IDs'),
+        marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('1.91:1 image asset IDs'),
+        square_marketing_image_asset_ids: z.array(z.string().regex(/^\d+$/)).min(1).max(15).describe('1:1 image asset IDs'),
+        logo_image_asset_ids: z.array(z.string().regex(/^\d+$/)).max(5).describe('Logo asset IDs'),
       }),
       safe_word: safeWordSchema,
     },
@@ -435,13 +435,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_performance_max_campaign_full',
-    'Prepare a COMPLETE Performance Max campaign in ONE atomic operation: budget + campaign (AI asset enhancements OFF by default) + asset group + inline text assets (headlines/long headlines/descriptions/business name) + linked existing image assets + optional audience signals. Returns a SINGLE preview and ONE confirmation token. Builds an asset-based PMax (no Merchant feed / listing groups).',
+    'Create a whole asset-based Performance Max campaign in one confirm: budget, asset group, text and existing image assets, signals.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
-      target_roas: z.number().positive().max(50).optional().describe('Optional tROAS multiplier, e.g. 4.0 = 400% (NOT a percent)'),
-      opt_out_ai_enhancements: z.boolean().optional().describe('Default true: opt out of text + final URL expansion automation'),
+      customer_id: z.string(),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
+      target_roas: z.number().positive().max(50).optional().describe('Optional multiplier, 4.0 = 400%'),
+      opt_out_ai_enhancements: z.boolean().optional().describe('Default true: no text or URL expansion'),
       asset_group_name: z.string().min(1),
       final_urls: z.array(z.string().url()).min(1),
       business_name: z.string().min(1).max(25).optional(),
@@ -451,11 +451,11 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
       image_assets: z.array(z.object({
         asset_id: z.string().regex(/^\d+$/),
         field_type: z.enum(['MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'PORTRAIT_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO']),
-      })).min(1).describe('Existing image asset IDs with their field type'),
+      })).min(1),
       audience_signals: z.array(z.object({
         type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
-        text: z.string().min(1).max(80).optional().describe('Required for SEARCH_THEME'),
-        audience_id: z.string().regex(/^\d+$/).optional().describe('Required for AUDIENCE'),
+        text: z.string().min(1).max(80).optional().describe('For SEARCH_THEME'),
+        audience_id: z.string().regex(/^\d+$/).optional().describe('For AUDIENCE'),
       })).optional(),
       safe_word: safeWordSchema,
     },
@@ -496,11 +496,11 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_display_campaign',
-    'Prepare creation of a paused Display campaign with a daily budget. Returns a preview and confirmation token.',
+    'Create an empty paused Display campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
+      customer_id: z.string(),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_amount, safe_word }) => {
@@ -523,13 +523,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_performance_max_campaign',
-    'Prepare creation of a paused Performance Max campaign with a daily budget. Returns a preview and confirmation token.',
+    'Create an empty paused Performance Max campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_name: z.string().min(1).describe('New campaign name'),
-      daily_budget_amount: z.number().positive().describe('Daily budget in account currency units (see list_accounts); capped by server safety limit'),
-      business_name_asset_id: z.string().optional().describe('Optional existing TEXT asset ID for PMax brand guidelines business name'),
-      logo_asset_id: z.string().optional().describe('Optional existing square IMAGE asset ID for PMax brand guidelines logo'),
+      customer_id: z.string(),
+      campaign_name: z.string().min(1),
+      daily_budget_amount: z.number().positive(),
+      business_name_asset_id: z.string().optional().describe('Optional TEXT asset ID (brand guidelines)'),
+      logo_asset_id: z.string().optional().describe('Optional square IMAGE asset ID (brand guidelines)'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_name, daily_budget_amount, business_name_asset_id, logo_asset_id, safe_word }) => {
@@ -565,12 +565,12 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_ad_group',
-    'Prepare creation of a paused Search ad group under an existing campaign. Returns a preview and confirmation token.',
+    'Create a paused Search ad group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      ad_group_name: z.string().min(1).describe('New ad group name'),
-      cpc_bid_amount: z.number().positive().describe('Max CPC bid in account currency units (see list_accounts); capped by server safety limit'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      ad_group_name: z.string().min(1),
+      cpc_bid_amount: z.number().positive(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_amount, safe_word }) => {
@@ -595,13 +595,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_display_ad_group',
-    'Prepare creation of a paused Display ad group under an existing campaign. Returns a preview and confirmation token.',
+    'Create a paused Display ad group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      ad_group_name: z.string().min(1).describe('New ad group name'),
-      cpc_bid_amount: z.number().positive().describe('Max CPC bid in account currency units (see list_accounts); capped by server safety limit'),
-      optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag. Set false to keep delivery strictly within your audience selection. Omit to use the Google default.'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      ad_group_name: z.string().min(1),
+      cpc_bid_amount: z.number().positive(),
+      optimized_targeting_enabled: z.boolean().optional().describe('false keeps delivery within your audiences; omit for the Google default'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, ad_group_name, cpc_bid_amount, optimized_targeting_enabled, safe_word }) => {
@@ -633,14 +633,14 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_ad_group_update',
-    'Prepare an update to an existing ad group (max CPC bid, status, name, optimized targeting). Reads the current values first and previews them as before -> after. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Update ad group CPC, status, name or optimized targeting; preview shows before -> after.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Existing ad group ID'),
-      cpc_bid_amount: z.number().positive().optional().describe('New max CPC bid in account currency units (see list_accounts); capped by server safety limit. Only affects delivery when the campaign uses MANUAL_CPC.'),
-      status: entityStatusSchema.optional().describe('New ad group status'),
-      name: z.string().min(1).optional().describe('New ad group name'),
-      optimized_targeting_enabled: z.boolean().optional().describe('Optimized targeting flag: true to enable, false to keep delivery within your audience selection'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      cpc_bid_amount: z.number().positive().optional().describe('Only matters with MANUAL_CPC'),
+      status: entityStatusSchema.optional(),
+      name: z.string().min(1).optional(),
+      optimized_targeting_enabled: z.boolean().optional().describe('false keeps delivery within your audiences'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, cpc_bid_amount, status, name, optimized_targeting_enabled, safe_word }) => {
@@ -686,10 +686,10 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_remove_ad_group_criterion',
-    'Prepare removal of ad group criteria (e.g. display topics, placements, audiences) by full resource name. Returns a preview and confirmation token.',
+    'Remove ad group criteria (topics, placements, audiences).',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      resource_names: z.array(adGroupCriterionResourceNameSchema).min(1).max(MAX_AD_GROUP_CRITERIA_PER_MUTATION).describe('Ad group criterion resource names, e.g. customers/123/adGroupCriteria/456~789'),
+      customer_id: z.string(),
+      resource_names: z.array(adGroupCriterionResourceNameSchema).min(1).max(MAX_AD_GROUP_CRITERIA_PER_MUTATION).describe('e.g. customers/1/adGroupCriteria/2~3'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, resource_names, safe_word }) => {
@@ -714,11 +714,11 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_negative_topics',
-    'Prepare creation of negative topic criteria at campaign level (excludes content categories from delivery). Returns a preview and confirmation token.',
+    'Exclude topics at campaign level.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Campaign ID to exclude topics from'),
-      topics: z.array(negativeTopicSchema).min(1).max(MAX_NEGATIVE_TOPICS_PER_MUTATION).describe('Topic constants to exclude, e.g. ["topicConstants/1149"] or ["1149"]'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      topics: z.array(negativeTopicSchema).min(1).max(MAX_NEGATIVE_TOPICS_PER_MUTATION).describe('Topic constant IDs, e.g. ["1149"]'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, topics, safe_word }) => {
@@ -746,12 +746,12 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_targeting',
-    'Prepare adding location and language targeting criteria to a campaign. Returns a preview and confirmation token.',
+    'Add location and language targeting to a campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      locations: z.array(z.string().min(1)).default([]).describe('Countries as ISO codes such as ["PL"] or ["CZ","SK"], or numeric geo target constant IDs for regions and cities'),
-      languages: z.array(z.string().min(1)).default([]).describe('Languages as ISO codes such as ["pl"] or ["cs","en"], or numeric language constant IDs'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      locations: z.array(z.string().min(1)).default([]).describe('ISO country codes or geo target constant IDs'),
+      languages: z.array(z.string().min(1)).default([]).describe('ISO language codes or language constant IDs'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, locations, languages, safe_word }) => {
@@ -786,13 +786,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_bidding_strategy',
-    'Prepare changing the bidding strategy of a campaign (e.g. from Manual CPC to Target CPA or Target ROAS). Returns a preview and confirmation token.',
+    'Change a campaign\'s bidding strategy.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      strategy_type: biddingStrategyTypeSchema.describe('Bidding strategy type'),
-      target_cpa_amount: z.number().positive().optional().describe('Target CPA in account currency units (see list_accounts) (required for TARGET_CPA); capped by server safety limit'),
-      target_roas: targetRoasSchema.optional().describe('Target ROAS as a multiplier, e.g. 4.0 means 400% ROAS (required for TARGET_ROAS)'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      strategy_type: biddingStrategyTypeSchema,
+      target_cpa_amount: z.number().positive().optional().describe('Required for TARGET_CPA'),
+      target_roas: targetRoasSchema.optional().describe('Multiplier, 4.0 = 400%. Required for TARGET_ROAS'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, strategy_type, target_cpa_amount, target_roas, safe_word }) => {
@@ -830,17 +830,17 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_demographic_bid_modifier',
-    'Prepare setting bid modifiers for demographic criteria (age range / gender) on a campaign or ad group. Use execute_gaql first to get criterion IDs. Returns a preview and confirmation token.',
+    'Set age/gender bid modifiers on a campaign or ad group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      level: z.enum(['campaign', 'ad_group']).describe('Level to set bid modifiers on'),
-      campaign_id: z.string().optional().describe('Campaign ID, required when level=campaign'),
-      ad_group_id: z.string().optional().describe('Ad group ID, required when level=ad_group'),
+      customer_id: z.string(),
+      level: z.enum(['campaign', 'ad_group']),
+      campaign_id: z.string().optional().describe('Required when level=campaign'),
+      ad_group_id: z.string().optional().describe('Required when level=ad_group'),
       modifiers: z.array(z.object({
-        criterion_id: z.string().describe('Criterion ID for the demographic (from GAQL: ad_group_criterion.criterion_id or campaign_criterion.criterion_id)'),
-        label: z.string().describe('Human-readable label for preview, e.g. "AGE_RANGE_65_UP" or "FEMALE"'),
-        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).describe('Bid modifier multiplier: 0.0 to exclude, 1.0 = no change, 1.5 = +50%, 0.5 = -50%'),
-      })).min(1).max(MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION).describe('Demographic bid modifiers to set'),
+        criterion_id: z.string().describe('From GAQL *_criterion.criterion_id'),
+        label: z.string().describe('Preview label'),
+        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).describe('0 excludes, 1.0 no change, 1.5 = +50%'),
+      })).min(1).max(MAX_DEMOGRAPHIC_MODIFIERS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, level, campaign_id, ad_group_id, modifiers, safe_word }) => {
@@ -880,15 +880,15 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_conversion_goals',
-    'Prepare updating which conversion goals are primary (biddable) for a campaign. Use execute_gaql first to list campaign_conversion_goal resources. Returns a preview and confirmation token.',
+    'Choose which conversion goals are primary (biddable) for a campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Campaign ID (for preview)'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
       goals: z.array(z.object({
-        resource_name: z.string().describe('Full campaign_conversion_goal resource name, e.g. customers/123/campaignConversionGoals/456~PURCHASE~WEBSITE'),
-        biddable: z.boolean().describe('true = PRIMARY (Smart Bidding optimizes for this), false = SECONDARY (tracked but not optimized)'),
-        label: z.string().describe('Human-readable label for preview, e.g. "PURCHASE / WEBSITE"'),
-      })).min(1).max(MAX_CONVERSION_GOALS_PER_MUTATION).describe('Conversion goals to update'),
+        resource_name: z.string().describe('campaign_conversion_goal resource name'),
+        biddable: z.boolean().describe('true = primary, false = secondary'),
+        label: z.string().describe('Preview label'),
+      })).min(1).max(MAX_CONVERSION_GOALS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, goals, safe_word }) => {
@@ -917,13 +917,13 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_shared_set',
-    'Prepare linking an existing shared set (e.g. negative keyword list) to a campaign. Returns a preview and confirmation token.',
+    'Link a shared set, e.g. a negative keyword list, to a campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Campaign ID to link the shared set to'),
-      campaign_name: z.string().describe('Campaign name (for preview)'),
-      shared_set_id: z.string().describe('Shared set ID (from execute_gaql on shared_set resource)'),
-      shared_set_name: z.string().describe('Shared set name (for preview)'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      campaign_name: z.string(),
+      shared_set_id: z.string().describe('From GAQL shared_set'),
+      shared_set_name: z.string().describe('Preview label'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, campaign_name, shared_set_id, shared_set_name, safe_word }) => {
@@ -944,18 +944,18 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_ad_schedule',
-    'Prepare creating ad schedule criteria (dayparting) with optional bid modifiers for a campaign. Returns a preview and confirmation token.',
+    'Add ad schedules (dayparting) with optional bid modifiers.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Campaign ID'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
       schedules: z.array(z.object({
-        day_of_week: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).describe('Day of week'),
-        start_hour: z.number().int().min(0).max(23).describe('Start hour (0-23)'),
-        start_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO').describe('Start minute'),
-        end_hour: z.number().int().min(1).max(24).describe('End hour (1-24, where 24 means midnight)'),
-        end_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO').describe('End minute'),
-        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).default(1.0).describe('Bid modifier: 1.0 = no change, 1.5 = +50%'),
-      })).min(1).max(MAX_AD_SCHEDULES_PER_MUTATION).describe('Ad schedule entries'),
+        day_of_week: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
+        start_hour: z.number().int().min(0).max(23).describe('0-23'),
+        start_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO'),
+        end_hour: z.number().int().min(1).max(24).describe('1-24, 24 = midnight'),
+        end_minute: z.enum(['ZERO', 'FIFTEEN', 'THIRTY', 'FORTY_FIVE']).default('ZERO'),
+        bid_modifier: z.number().min(0).max(MAX_BID_MODIFIER).default(1.0).describe('1.0 no change, 1.5 = +50%'),
+      })).min(1).max(MAX_AD_SCHEDULES_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, schedules, safe_word }) => {
@@ -993,29 +993,29 @@ export function registerCampaignPrepareTools(server: McpServer, cfg: AdsConfig):
 
   server.tool(
     'prepare_campaign_extensions',
-    'Prepare batch creation of campaign extensions (sitelinks, callouts, call, structured snippets) AND link them to a campaign in one atomic operation. Can also link existing assets (images, logos). Single confirmation for everything.',
+    'Create sitelinks, callouts, call and snippets and link them, plus existing assets, in one confirm.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
       sitelinks: z.array(z.object({
         link_text: z.string().min(1).max(25),
         description1: z.string().max(35).default(''),
         description2: z.string().max(35).default(''),
         final_url: z.string().url(),
-      })).max(20).default([]).describe('Sitelinks to create and link'),
-      callouts: z.array(z.string().min(1).max(25)).max(20).default([]).describe('Callout texts to create and link'),
+      })).max(20).default([]),
+      callouts: z.array(z.string().min(1).max(25)).max(20).default([]),
       call: z.object({
         country_code: z.string().min(2).max(2),
         phone_number: z.string().min(5).max(25),
-      }).optional().describe('Phone extension to create and link'),
+      }).optional(),
       structured_snippet: z.object({
         header: z.string().min(1),
         values: z.array(z.string().min(1).max(25)).min(3).max(10),
-      }).optional().describe('Structured snippet to create and link'),
+      }).optional(),
       existing_asset_links: z.array(z.object({
         asset_id: z.string(),
         field_type: campaignAssetFieldTypeSchema,
-      })).max(20).default([]).describe('Existing assets to link (e.g. images with AD_IMAGE, logos with LOGO)'),
+      })).max(20).default([]).describe('e.g. images as AD_IMAGE, logos as LOGO'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, sitelinks, callouts, call, structured_snippet, existing_asset_links, safe_word }) => {

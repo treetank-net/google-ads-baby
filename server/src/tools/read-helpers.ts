@@ -23,10 +23,10 @@ export function normalizeLimit(limit: number | undefined): number {
 }
 
 export const pageSchema = z.number().int().positive().optional()
-  .describe('Page number (default 1). Results are split into pages by response size; the response says how many pages there are.');
+  ;
 
 export const pageCharsSchema = z.number().int().min(4_000).max(200_000).optional()
-  .describe('Max characters per page (default 40000). Raise it only when you deliberately want a bigger single response.');
+  ;
 
 export function resourceNameLiteral(value: string): string {
   return `'${gaqlString(value.trim())}'`;

@@ -158,6 +158,18 @@ rozjazd między tym, co user przeczytał, a tym, co poleci do API, dało się zo
 **GAQL nie ma `OR` ani nawiasów grupujących** — alternatywa to dwa zapytania; test pilnuje, że żaden
 generowany string nie zawiera ` OR `.
 
+**Opisy toolów — jedno zdanie, manual w skillu:**
+`tools/list` model płaci w każdej sesji, zanim cokolwiek zrobi (pełny profil spadł z ~83k do ~42k
+znaków). Opis toola to jedno zdanie: co zwraca i kiedy go użyć (budżet 400 znaków, cel ~120). Opis
+parametru tylko wtedy, gdy nazwa i schemat nie mówią wszystkiego (budżet 100 znaków): bez opisów
+`customer_id`, `safe_word`, `page`, `*_id`, `*_name` i bez powtarzania limitów, które schemat już
+niesie (`maxLength`, `minItems`). Wspólne pojęcia (safe word, waluta, paginacja) są raz w instrukcjach
+serwera (`index.ts`), a progi, przepływy i pułapki w `skills/google-ads-manual/SKILL.md`. Nowy tool:
+jedno zdanie w opisie, szczegóły do manuala. `compactToolListing()` (`tools/compact-listing.ts`)
+wycina ze schematów pola, które służą tylko walidacji (`$schema`, `additionalProperties`, `pattern`,
+`minLength: 1`, `execution`). Zod waliduje dalej po stronie serwera. Budżety pilnuje
+`testToolListingBudget` w smoke. Kontrakt: `marketing-context-mcp/docs/response-format-contract.md`.
+
 **Skille pluginu (`skills/`):**
 Katalog `skills/<nazwa>/SKILL.md` jest wykrywany automatycznie — nie deklaruje się go w
 `plugin.json`. Skill to wiedza dla modelu, której nie da się wcisnąć w opis toola: `skills/gaql`
@@ -289,7 +301,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
-- `GOOGLE_ADS_BABY_PROFILE` — `full` (default, 65 tools), `manage` (41 tools: edits to existing entities, no creation/assets/composites), `read` (15 tools: read + diagnostics + history, zero mutations). Cuts the tool manifest from 21 433 to 10 424 / 3 783 tokens. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
+- `GOOGLE_ADS_BABY_PROFILE` — `read` (default, 15 tools: read + diagnostics + history, zero mutations), `manage` (41 tools: edits to existing entities, no creation/assets/composites), `full` (65 tools). Manifest ~2 100 / 5 800 / 12 100 tokens; unknown value falls back to `read`. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 - `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` — capy w jednostkach waluty konta. Ustawione = brane dosłownie (bez skalowania). Nieustawione = domyślne 500/50/500 przemnożone przez `CURRENCY_UNIT_SCALE`.

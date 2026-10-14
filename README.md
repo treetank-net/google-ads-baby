@@ -180,15 +180,15 @@ ready-made queries. Claude Code loads it on demand when a task involves GAQL.
 
 ## Tool Profiles
 
-`GOOGLE_ADS_BABY_PROFILE` decides which tools the server registers. The full manifest costs
-about 21 000 tokens of context in every session, so a narrower profile is worth setting when you
-only need part of the plugin. Restart the MCP server after changing it.
+`GOOGLE_ADS_BABY_PROFILE` decides which tools the server registers. The default is `read`:
+analysis is the common case, and the narrower manifest is cheaper in every session. Set `manage`
+or `full` to change accounts, then restart the MCP server. An unknown value falls back to `read`.
 
 | Profile | Tools | Manifest | What it covers |
 | --- | --- | --- | --- |
-| `full` (default) | 62 | ~21 400 tok | Everything |
-| `manage` | 38 | ~10 400 tok | Reads, diagnostics, and edits to existing entities (budget, bids, status, text, targeting, schedules). No creation, assets, cloning or `*_full` builders. |
-| `read` | 15 | ~3 800 tok | Reads, the five analysis reports, mutation history, auth. No `prepare_*`/`confirm_*` at all — mutation is impossible, not merely gated. |
+| `read` (default) | 15 | ~2 100 tok | Reads, the five analysis reports, mutation history, auth. No `prepare_*`/`confirm_*` at all — mutation is impossible, not merely gated. |
+| `manage` | 41 | ~5 800 tok | Reads, diagnostics, and edits to existing entities (budget, bids, status, text, targeting, schedules). No creation, assets, cloning or `*_full` builders. |
+| `full` | 65 | ~12 100 tok | Everything |
 
 Claude Code loads MCP tool schemas on demand, so the saving there is small; Codex, Cursor and
 Claude Desktop read the whole manifest up front and benefit fully.
@@ -201,92 +201,92 @@ For local end-to-end tests only, `GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1` enables th
 
 Setup & maintenance:
 
-- `setup_google_auth` — Start Google OAuth flow
-- `update_plugin` — Check for plugin updates and install them
+- `setup_google_auth` — Start Google OAuth; returns a URL for the user
+- `update_plugin` — Check for and download plugin updates
 
 Read:
 
-- `execute_gaql` — Run an arbitrary GAQL query against a Google Ads account (read-only)
-- `get_ad_blueprint` — Get one ad with campaign/ad group context, linked assets, and a clone-ready input shape for supported ad types
-- `get_build_context` — One-shot read of everything needed to build or extend campaigns on an account: campaigns (id/name/type/status/budget), ad groups (id/name/campaign), enabled conversion actions (needed for conversion-based bidding), and reusable image assets
-- `get_campaigns` — Get campaigns with performance metrics for a specific account
-- `list_accounts` — List all Google Ads accounts under the MCC
-- `list_ads_entities` — List Google Ads entities with optional filters and relationship context
+- `execute_gaql` — Run a read-only GAQL query
+- `get_ad_blueprint` — One ad with its context, linked assets and a clone-ready input
+- `get_build_context` — One call before building: campaigns, ad groups, enabled conversion actions, reusable image assets
+- `get_campaigns` — Campaigns with performance metrics, including zero-activity ones (REMOVED excluded)
+- `list_accounts` — List accessible Google Ads accounts with their currency
+- `list_ads_entities` — List campaigns, ad groups, ads, keywords, negatives, assets or ad-asset links, with filters
 
 Read-only analysis (review loops — findings + suggested follow-up task + possible `prepare_*` actions; never mutate):
 
-- `get_account_hygiene_report` — Read-only daily-check analysis for one account: scans enabled campaigns over a window and flags zero-spend, low budget utilization, and spend-with-no-conversions per the google-ads-daily-check workflow
-- `get_budget_scaling_candidates` — Read-only scan for budget-constrained SEARCH/SHOPPING campaigns: high budget utilization (>= 90%) together with search impression share lost to budget (> 10%), per the google-ads-monthly-review workflow
-- `get_display_remarketing_diagnostics` — Read-only delivery diagnostics for Display remarketing campaigns: checks serving status, whether any user list is attached, audience size against the ~100-user Display minimum, Display eligibility and membership duration of each list, paused ad groups inside enabled campaigns, and manual CPC bids low enough to suppress delivery
-- `get_pmax_channel_breakdown` — Read-only Performance Max analysis: cost/conversions per asset group with each group's share of its campaign spend, flagging asset groups burning budget with 0 conversions
-- `get_search_terms_waste_candidates` — Read-only negative-keyword scan: search terms with cost >= threshold and 0 conversions in the recent window, cross-checked against a longer window so historically-converting terms (bounce-backs) are excluded, per the google-ads-monthly-review workflow
+- `get_account_hygiene_report` — Daily check: zero spend, low budget use, spend without conversions
+- `get_budget_scaling_candidates` — Budget-limited SEARCH/SHOPPING campaigns worth scaling, with prepare_budget_change actions.search impression share lost to budget (> 10%), per the google-ads-monthly-review workflow
+- `get_display_remarketing_diagnostics` — Why a Display remarketing campaign is not serving: status, lists, audience size, bids
+- `get_pmax_channel_breakdown` — Performance Max cost and conversions per asset group, flagging spend without conversions
+- `get_search_terms_waste_candidates` — Search terms with spend and 0 conversions (bounce-backs excluded) as negative-keyword candidates.cross-checked against a longer window so historically-converting terms (bounce-backs) are excluded, per the google-ads-monthly-review workflow
 
 Mutation history:
 
-- `get_mutation_history` — Browse past mutation operations
-- `get_mutation_stats` — Get summary statistics of past mutations: total count, success/fail rate, breakdown by action type, which fields were changed for *_update actions, recently used asset IDs
+- `get_mutation_history` — Past mutations from the local audit log
+- `get_mutation_stats` — Summary of past mutations: counts, success rate, per action, recent asset IDs
 
 Write preparation — campaigns, budgets, targeting:
 
-- `prepare_ad_group_update` — Prepare an update to an existing ad group (max CPC bid, status, name, optimized targeting)
-- `prepare_ad_group` — Prepare creation of a paused Search ad group under an existing campaign
-- `prepare_ad_schedule` — Prepare creating ad schedule criteria (dayparting) with optional bid modifiers for a campaign
-- `prepare_bidding_strategy` — Prepare changing the bidding strategy of a campaign (e.g. from Manual CPC to Target CPA or Target ROAS)
-- `prepare_budget_change` — Prepare a campaign budget change
-- `prepare_campaign_conversion_goals` — Prepare updating which conversion goals are primary (biddable) for a campaign
-- `prepare_campaign_extensions` — Prepare batch creation of campaign extensions (sitelinks, callouts, call, structured snippets) AND link them to a campaign in one atomic operation
-- `prepare_campaign_removal` — Prepare removal of one or more campaigns
-- `prepare_campaign_shared_set` — Prepare linking an existing shared set (e.g. negative keyword list) to a campaign
-- `prepare_campaign_status` — Prepare a campaign status change (enable/pause)
-- `prepare_campaign_targeting` — Prepare adding location and language targeting criteria to a campaign
-- `prepare_campaign_update` — Prepare an update to an existing campaign (name, status, daily budget, bidding strategy)
-- `prepare_demographic_bid_modifier` — Prepare setting bid modifiers for demographic criteria (age range / gender) on a campaign or ad group
-- `prepare_display_ad_group` — Prepare creation of a paused Display ad group under an existing campaign
-- `prepare_display_campaign_full` — Prepare a COMPLETE Display campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad group + one responsive display ad (using existing uploaded image asset IDs)
-- `prepare_display_campaign` — Prepare creation of a paused Display campaign with a daily budget
-- `prepare_negative_topics` — Prepare creation of negative topic criteria at campaign level (excludes content categories from delivery)
-- `prepare_performance_max_campaign_full` — Prepare a COMPLETE Performance Max campaign in ONE atomic operation: budget + campaign (AI asset enhancements OFF by default) + asset group + inline text assets (headlines/long headlines/descriptions/business name) + linked existing image assets + optional audience signals
-- `prepare_performance_max_campaign` — Prepare creation of a paused Performance Max campaign with a daily budget
-- `prepare_remove_ad_group_criterion` — Prepare removal of ad group criteria (e.g. display topics, placements, audiences) by full resource name
-- `prepare_search_campaign_full` — Prepare a COMPLETE Search campaign in ONE atomic operation: budget + campaign + bidding + geo/language targeting + ad groups (each with keywords and a responsive search ad) + extensions (sitelinks/callouts/call)
-- `prepare_search_campaign` — Prepare creation of a paused Search campaign with a daily budget
+- `prepare_ad_group_update` — Update ad group CPC, status, name or optimized targeting; preview shows before -> after
+- `prepare_ad_group` — Create a paused Search ad group
+- `prepare_ad_schedule` — Add ad schedules (dayparting) with optional bid modifiers
+- `prepare_bidding_strategy` — Change a campaign's bidding strategy
+- `prepare_budget_change` — Change a campaign budget; the preview reads the current amount and flags shared budgets
+- `prepare_campaign_conversion_goals` — Choose which conversion goals are primary (biddable) for a campaign
+- `prepare_campaign_extensions` — Create sitelinks, callouts, call and snippets and link them, plus existing assets, in one confirm
+- `prepare_campaign_removal` — Remove campaigns
+- `prepare_campaign_shared_set` — Link a shared set, e.g. a negative keyword list, to a campaign
+- `prepare_campaign_status` — Enable or pause a campaign
+- `prepare_campaign_targeting` — Add location and language targeting to a campaign
+- `prepare_campaign_update` — Update campaign name, status, daily budget or bidding; preview shows before -> after
+- `prepare_demographic_bid_modifier` — Set age/gender bid modifiers on a campaign or ad group
+- `prepare_display_ad_group` — Create a paused Display ad group
+- `prepare_display_campaign_full` — Create a whole Display campaign in one confirm: budget, bidding, targeting, ad group, responsive display ad from existing images
+- `prepare_display_campaign` — Create an empty paused Display campaign
+- `prepare_negative_topics` — Exclude topics at campaign level
+- `prepare_performance_max_campaign_full` — Create a whole asset-based Performance Max campaign in one confirm: budget, asset group, text and existing image assets, signals
+- `prepare_performance_max_campaign` — Create an empty paused Performance Max campaign
+- `prepare_remove_ad_group_criterion` — Remove ad group criteria (topics, placements, audiences)
+- `prepare_search_campaign_full` — Create a whole Search campaign in one atomic confirm: budget, bidding, targeting, ad groups with keywords and RSAs, extensions
+- `prepare_search_campaign` — Create an empty paused Search campaign
 
 Write preparation — ads & keywords:
 
-- `prepare_ad_status` — Prepare status change (enable/pause) for an existing ad
-- `prepare_ad_update` — Prepare an update to an existing responsive search or responsive display ad (status, final URL, headlines, descriptions)
-- `prepare_clone_entity` — Prepare cloning a supported Google Ads entity as paused
-- `prepare_keyword_status` — Prepare status change (enable/pause/remove) for existing keywords in an ad group
-- `prepare_keywords` — Prepare creation of enabled search keywords in an existing ad group
-- `prepare_negative_keywords` — Prepare creation of negative keywords at campaign or ad group level
-- `prepare_responsive_display_ad` — Prepare creation of a paused responsive display ad under an existing ad group
-- `prepare_responsive_search_ad` — Prepare creation of a paused responsive search ad under an existing ad group
+- `prepare_ad_status` — Enable or pause an ad
+- `prepare_ad_update` — Update an RSA or RDA's status, URL, headlines or descriptions; preview shows before -> after
+- `prepare_clone_entity` — Clone a responsive search or display ad as paused, optionally replacing text, URL or images
+- `prepare_keyword_status` — Enable, pause or remove keywords
+- `prepare_keywords` — Add keywords to a Search ad group
+- `prepare_negative_keywords` — Add negative keywords at campaign or ad group level
+- `prepare_responsive_display_ad` — Create a paused responsive display ad
+- `prepare_responsive_search_ad` — Create a paused responsive search ad
 
 Write preparation — assets & extensions:
 
-- `prepare_ad_group_assets` — Prepare linking existing assets (images, sitelinks, callouts, etc.) to an ad group
-- `prepare_asset_group_assets` — Prepare linking existing assets to a Performance Max asset group
-- `prepare_asset_group_listing_groups` — Prepare creation of Performance Max asset group listing group trees
-- `prepare_asset_group_signals` — Prepare linking asset group signals to a Performance Max asset group
-- `prepare_asset_group` — Prepare creation of a paused Performance Max asset group under an existing campaign
-- `prepare_call_asset` — Prepare creation of a call (phone) asset for click-to-call extensions
-- `prepare_callout_assets` — Prepare creation of callout assets (short USP phrases like "Free shipping", "24/7 support")
-- `prepare_campaign_assets` — Prepare linking existing assets (images, sitelinks, callouts, etc.) to a campaign
-- `prepare_image_asset_from_file` — Prepare upload of an image asset from a local file path
-- `prepare_image_asset_from_url` — Prepare upload of an image asset from a public URL
-- `prepare_sitelink_assets` — Prepare creation of sitelink assets
-- `prepare_structured_snippet_assets` — Prepare creation of structured snippet assets (e.g. header "Types" with values "Sedan, SUV, Truck")
+- `prepare_ad_group_assets` — Link existing assets to an ad group
+- `prepare_asset_group_assets` — Link existing assets to a Performance Max asset group
+- `prepare_asset_group_listing_groups` — Create a Performance Max listing group tree
+- `prepare_asset_group_signals` — Add search-theme or audience signals to a Performance Max asset group
+- `prepare_asset_group` — Create a paused Performance Max asset group with its core assets
+- `prepare_call_asset` — Create a call asset; link it with prepare_campaign_assets (CALL)
+- `prepare_callout_assets` — Create callout assets; link them with prepare_campaign_assets (CALLOUT)
+- `prepare_campaign_assets` — Link existing assets to a campaign
+- `prepare_image_asset_from_file` — Upload an image asset from a local file
+- `prepare_image_asset_from_url` — Upload an image asset from a public URL
+- `prepare_sitelink_assets` — Create sitelink assets; link them with prepare_campaign_assets (SITELINK)
+- `prepare_structured_snippet_assets` — Create structured snippet assets; link them with prepare_campaign_assets (STRUCTURED_SNIPPET)
 
 Confirmation & safety:
 
-- `confirm_all_mutations` — Execute ALL pending mutations in one batch
-- `confirm_mutation` — Execute a previously prepared mutation
-- `confirm_safe_word` — Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1
+- `confirm_all_mutations` — Execute several prepared mutations that share one confirmed safe word
+- `confirm_mutation` — Execute a prepared mutation or batch after the user replied with its safe word
+- `confirm_safe_word` — Test-only: confirm a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1
 - `discard_pending_mutations` — Drop pending operations without executing them
-- `get_safety_setup` — Explain the current mutation safety model and how to install Codex hooks if plugin-local hooks are not active
-- `list_pending_mutations` — List all pending (unconfirmed) mutations with their previews and tokens
-- `prepare_batch` — Fold pending operations into ONE batch: one combined preview, one new server-minted safe word, one confirmation
-- `unfold_batch` — Split a batch back into separate pending operations under one new safe word
+- `get_safety_setup` — Explain the mutation safety model and hook installation
+- `list_pending_mutations` — List pending (unconfirmed) mutations
+- `prepare_batch` — Fold pending tokens into one batch: one preview, one new server-generated safe word
+- `unfold_batch` — Split a batch back into separate pending operations
 
 <!-- TOOLS:END -->
 

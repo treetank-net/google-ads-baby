@@ -84,6 +84,7 @@ import {
 import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
 import { registerAuthTools } from '../src/tools/auth.js';
+import { compactToolListing, compactSchema } from '../src/tools/compact-listing.js';
 import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
 import { PLUGIN_VERSION } from '../src/constants.js';
 import { mkdtempSync, readFileSync } from 'fs';
@@ -260,11 +261,62 @@ function registeredForProfile(profile: ToolProfile): Record<string, any> {
   return (server as any)._registeredTools as Record<string, any>;
 }
 
+const LISTING_BUDGET_CHARS: Record<ToolProfile, number> = { read: 15_000, manage: 30_000, full: 45_000 };
+const TOOL_DESCRIPTION_BUDGET = 400;
+const PARAM_DESCRIPTION_BUDGET = 100;
+
+async function listedTools(profile: ToolProfile): Promise<any[]> {
+  const server = new McpServer({ name: 'smoke', version: '0.0.0' });
+  const target = withProfile(server, profile);
+  const cfg = { ...SMOKE_CFG, toolProfile: profile };
+  registerAuthTools(target, cfg);
+  registerReadTools(target, cfg);
+  registerWriteTools(target, cfg);
+  compactToolListing(server);
+  const handler = (server.server as any)._requestHandlers.get('tools/list');
+  const listing = await handler({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, {});
+  return listing.tools;
+}
+
+function paramDescriptions(schema: unknown, path: string, out: Array<[string, string]>): void {
+  if (Array.isArray(schema)) return schema.forEach((item) => paramDescriptions(item, path, out));
+  if (!schema || typeof schema !== 'object') return;
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === 'description' && typeof value === 'string') out.push([path, value]);
+    else paramDescriptions(value, key === 'properties' || key === 'items' ? path : `${path}.${key}`, out);
+  }
+}
+
+async function testToolListingBudget() {
+  console.log('\n--- Tool listing budget ---');
+
+  const compacted = compactSchema({ type: 'object', $schema: 'x', additionalProperties: false, properties: { pattern: { type: 'string', pattern: '^a$', minLength: 1, maxLength: 30 } } }) as any;
+  assert('compaction drops validation-only keys', !('$schema' in compacted) && !('additionalProperties' in compacted) && !('pattern' in compacted.properties.pattern));
+  assert('compaction keeps a property that happens to be named like a dropped key', 'pattern' in compacted.properties);
+  assert('compaction keeps limits the model writes against', compacted.properties.pattern.maxLength === 30 && !('minLength' in compacted.properties.pattern));
+
+  for (const profile of ['read', 'manage', 'full'] as ToolProfile[]) {
+    const tools = await listedTools(profile);
+    const size = JSON.stringify(tools).length;
+    assert(`${profile} tools/list stays within ${LISTING_BUDGET_CHARS[profile]} chars`, size <= LISTING_BUDGET_CHARS[profile], `${size} chars`);
+    assert(`${profile} tools/list carries no taskSupport boilerplate`, !tools.some((t) => t.execution));
+  }
+
+  const tools = await listedTools('full');
+  const longTools = tools.filter((t) => (t.description ?? '').length > TOOL_DESCRIPTION_BUDGET).map((t) => `${t.name} (${t.description.length})`);
+  assert(`every tool description is at most ${TOOL_DESCRIPTION_BUDGET} chars`, longTools.length === 0, longTools.join(', '));
+  const params: Array<[string, string]> = [];
+  for (const tool of tools) paramDescriptions(tool.inputSchema, tool.name, params);
+  const longParams = params.filter(([, text]) => text.length > PARAM_DESCRIPTION_BUDGET).map(([path, text]) => `${path} (${text.length})`);
+  assert(`every parameter description is at most ${PARAM_DESCRIPTION_BUDGET} chars`, longParams.length === 0, longParams.join(', '));
+}
+
 function testProfiles() {
   console.log('\n--- Tool profiles ---');
 
-  assert('unset profile defaults to full', normalizeProfile(undefined) === 'full');
-  assert('unknown profile value falls back to full', normalizeProfile('everything') === 'full');
+  assert('unset profile defaults to read', normalizeProfile(undefined) === 'read');
+  assert('unknown profile value falls back to read', normalizeProfile('everything') === 'read');
+  assert('full must be asked for explicitly', normalizeProfile('full') === 'full');
   assert('profile value is case- and space-insensitive', normalizeProfile('  Read ') === 'read');
 
   const full = registeredForProfile('full');
@@ -1199,6 +1251,7 @@ async function main() {
   testCampaignListing();
   testPagination();
   testProfiles();
+  await testToolListingBudget();
   testDisplayRemarketing();
   testAccountCurrency();
   testLimitHelpers();

@@ -87,7 +87,7 @@ async function fetchChangelog(fromVer: string, toVer: string): Promise<string> {
 export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
     'setup_google_auth',
-    'Start Google OAuth flow. Returns a URL for the user to click. After authorization the refresh token is saved automatically.',
+    'Start Google OAuth; returns a URL for the user. The token is saved automatically.',
     {},
     async () => {
       const { shortUrl } = startAuthFlow(cfg);
@@ -107,7 +107,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'update_plugin',
-    'Check for plugin updates and download them. Reports the version installed on disk separately from the version this process is actually running, because a running MCP server cannot swap its own bundle — the download only takes effect after a session restart.',
+    'Check for and download plugin updates. Takes effect after a session restart.',
     {},
     async () => {
       const installedVer = getInstalledVersion();

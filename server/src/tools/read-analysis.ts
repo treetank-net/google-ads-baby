@@ -81,12 +81,12 @@ const followUp =
 export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
     'get_account_hygiene_report',
-    'Read-only daily-check analysis for one account: scans enabled campaigns over a window and flags zero-spend, ' +
+    'Daily check: zero spend, low budget use, spend without conversions. Findings + prepare_* actions.' +
       'low budget utilization, and spend-with-no-conversions per the google-ads-daily-check workflow. Returns findings ' +
       'with severity, metrics, a suggested follow-up task, and possible prepare_* actions. Does not mutate anything.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      customer_id: z.string(),
+      days: analysisWindowSchema,
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -116,13 +116,13 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_budget_scaling_candidates',
-    'Read-only scan for budget-constrained SEARCH/SHOPPING campaigns: high budget utilization (>= 90%) together with ' +
+    'Budget-limited SEARCH/SHOPPING campaigns worth scaling, with prepare_budget_change actions.' +
       'search impression share lost to budget (> 10%), per the google-ads-monthly-review workflow. Returns scaling ' +
       'candidates with ROAS/util/IS context, a suggested task pointing at the budget-scaling workflow, and ' +
       'prepare_budget_change as the possible action. Does not mutate anything.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      customer_id: z.string(),
+      days: analysisWindowSchema,
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -151,14 +151,14 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_search_terms_waste_candidates',
-    'Read-only negative-keyword scan: search terms with cost >= threshold and 0 conversions in the recent window, ' +
+    'Search terms with spend and 0 conversions (bounce-backs excluded) as negative-keyword candidates.' +
       'cross-checked against a longer window so historically-converting terms (bounce-backs) are excluded, per the ' +
       'google-ads-monthly-review workflow. Returns negative-keyword candidates with a suggested task and ' +
       'prepare_negative_keywords as the possible action. Does not mutate anything.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      recent_days: z.enum(['14', '30']).default('30').describe('Recent window for the 0-conversion test'),
-      cross_check_days: z.enum(['60', '90']).default('90').describe('Longer window for the bounce-back cross-check'),
+      customer_id: z.string(),
+      recent_days: z.enum(['14', '30']).default('30').describe('0-conversion window'),
+      cross_check_days: z.enum(['60', '90']).default('90').describe('Bounce-back window'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -194,14 +194,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_display_remarketing_diagnostics',
-    'Read-only delivery diagnostics for Display remarketing campaigns: checks serving status, whether any user list is ' +
-      'attached, audience size against the ~100-user Display minimum, Display eligibility and membership duration of each ' +
-      'list, paused ad groups inside enabled campaigns, and manual CPC bids low enough to suppress delivery. When the ' +
-      'campaign uses automated bidding it says so explicitly, because then CPC changes cannot fix delivery. Use this ' +
-      'before changing bids on a campaign that is not serving. Does not mutate anything.',
+    'Why a Display remarketing campaign is not serving: status, lists, audience size, bids. Use before changing bids.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      customer_id: z.string(),
+      days: analysisWindowSchema,
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -255,13 +251,10 @@ export function registerAnalysisReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_pmax_channel_breakdown',
-    'Read-only Performance Max analysis: cost/conversions per asset group with each group\'s share of its campaign ' +
-      'spend, flagging asset groups burning budget with 0 conversions. Note: Google Ads does not expose a clean ' +
-      'per-channel (Shopping vs Display vs Search) split for PMax via GAQL, so this reports the asset-group level; ' +
-      'the finer feed-only-leak check from the workflow still needs the manual PMax placement report. Does not mutate.',
+    'Performance Max cost and conversions per asset group, flagging spend without conversions.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      days: analysisWindowSchema.describe('Lookback window in days (7/14/30)'),
+      customer_id: z.string(),
+      days: analysisWindowSchema,
       page: pageSchema,
       page_chars: pageCharsSchema,
     },

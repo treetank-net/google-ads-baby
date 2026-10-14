@@ -33,11 +33,11 @@ import {
 export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
     'prepare_image_asset_from_file',
-    'Prepare upload of an image asset from a local file path. Returns a preview and confirmation token.',
+    'Upload an image asset from a local file.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      asset_name: z.string().min(1).max(255).describe('Name for the new image asset'),
-      file_path: z.string().min(1).describe('Absolute or relative local file path'),
+      customer_id: z.string(),
+      asset_name: z.string().min(1).max(255),
+      file_path: z.string().min(1),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_name, file_path, safe_word }) => {
@@ -72,11 +72,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_image_asset_from_url',
-    'Prepare upload of an image asset from a public URL. Returns a preview and confirmation token.',
+    'Upload an image asset from a public URL.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      asset_name: z.string().min(1).max(255).describe('Name for the new image asset'),
-      image_url: z.string().url().describe('Public image URL'),
+      customer_id: z.string(),
+      asset_name: z.string().min(1).max(255),
+      image_url: z.string().url(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_name, image_url, safe_word }) => {
@@ -114,15 +114,15 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_sitelink_assets',
-    'Prepare creation of sitelink assets. After creation, link them to a campaign via prepare_campaign_assets with field_type SITELINK. Returns a preview and confirmation token.',
+    'Create sitelink assets; link them with prepare_campaign_assets (SITELINK).',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
+      customer_id: z.string(),
       sitelinks: z.array(z.object({
-        link_text: z.string().min(1).max(25).describe('Sitelink text shown in the ad, max 25 chars'),
-        description1: z.string().max(35).default('').describe('First description line, max 35 chars'),
-        description2: z.string().max(35).default('').describe('Second description line, max 35 chars'),
-        final_url: z.string().url().describe('Landing page URL for this sitelink'),
-      })).min(1).max(20).describe('Sitelinks to create'),
+        link_text: z.string().min(1).max(25),
+        description1: z.string().max(35).default(''),
+        description2: z.string().max(35).default(''),
+        final_url: z.string().url(),
+      })).min(1).max(20),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, sitelinks, safe_word }) => {
@@ -148,10 +148,10 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_callout_assets',
-    'Prepare creation of callout assets (short USP phrases like "Free shipping", "24/7 support"). After creation, link them to a campaign via prepare_campaign_assets with field_type CALLOUT. Returns a preview and confirmation token.',
+    'Create callout assets; link them with prepare_campaign_assets (CALLOUT).',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      callouts: z.array(z.string().min(1).max(25)).min(1).max(20).describe('Callout texts, max 25 chars each'),
+      customer_id: z.string(),
+      callouts: z.array(z.string().min(1).max(25)).min(1).max(20),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, callouts, safe_word }) => {
@@ -172,11 +172,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_call_asset',
-    'Prepare creation of a call (phone) asset for click-to-call extensions. After creation, link it to a campaign via prepare_campaign_assets with field_type CALL. Returns a preview and confirmation token.',
+    'Create a call asset; link it with prepare_campaign_assets (CALL).',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      country_code: z.string().min(2).max(2).describe('Two-letter country code, e.g. PL, US, DE'),
-      phone_number: z.string().min(5).max(25).describe('Phone number in local or international format'),
+      customer_id: z.string(),
+      country_code: z.string().min(2).max(2).describe('ISO, e.g. PL'),
+      phone_number: z.string().min(5).max(25),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, country_code, phone_number, safe_word }) => {
@@ -195,11 +195,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_structured_snippet_assets',
-    'Prepare creation of structured snippet assets (e.g. header "Types" with values "Sedan, SUV, Truck"). After creation, link to a campaign via prepare_campaign_assets with field_type STRUCTURED_SNIPPET. Returns a preview and confirmation token.',
+    'Create structured snippet assets; link them with prepare_campaign_assets (STRUCTURED_SNIPPET).',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      header: z.string().min(1).describe('Snippet header — must be a predefined Google Ads header, e.g. "Brands", "Types", "Destinations", "Courses", "Services", "Styles", "Amenities"'),
-      values: z.array(z.string().min(1).max(25)).min(3).max(10).describe('Snippet values, 3-10 items, max 25 chars each'),
+      customer_id: z.string(),
+      header: z.string().min(1).describe('Predefined header, e.g. Brands, Types, Services'),
+      values: z.array(z.string().min(1).max(25)).min(3).max(10),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, header, values, safe_word }) => {
@@ -222,11 +222,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_campaign_assets',
-    'Prepare linking existing assets (images, sitelinks, callouts, etc.) to a campaign. Use this to add image extensions to Search campaigns. Returns a preview and confirmation token.',
+    'Link existing assets to a campaign.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing campaign ID'),
-      assets: z.array(campaignAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the campaign'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      assets: z.array(campaignAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, assets, safe_word }) => {
@@ -263,11 +263,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_ad_group_assets',
-    'Prepare linking existing assets (images, sitelinks, callouts, etc.) to an ad group. Returns a preview and confirmation token.',
+    'Link existing assets to an ad group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Existing ad group ID'),
-      assets: z.array(adGroupAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION).describe('Assets to link to the ad group'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      assets: z.array(adGroupAssetSchema).min(1).max(MAX_CAMPAIGN_ASSETS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, assets, safe_word }) => {
@@ -304,16 +304,16 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_asset_group',
-    'Prepare creation of a paused Performance Max asset group under an existing campaign. Returns a preview and confirmation token.',
+    'Create a paused Performance Max asset group with its core assets.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      campaign_id: z.string().describe('Existing Performance Max campaign ID'),
-      asset_group_name: z.string().min(1).describe('New asset group name'),
-      final_urls: z.array(z.string().url()).min(1).max(20).describe('Landing page final URLs for the asset group'),
+      customer_id: z.string(),
+      campaign_id: z.string(),
+      asset_group_name: z.string().min(1),
+      final_urls: z.array(z.string().url()).min(1).max(20),
       assets: z.array(z.object({
-        asset_id: z.string().describe('Existing asset ID'),
-        field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
-      })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Existing assets to link while creating the asset group. PMax requires core creative assets at creation time.'),
+        asset_id: z.string(),
+        field_type: assetFieldTypeSchema.describe('e.g. HEADLINE, MARKETING_IMAGE'),
+      })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Core creatives are required at creation'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, campaign_id, asset_group_name, final_urls, assets, safe_word }) => {
@@ -361,14 +361,14 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_asset_group_assets',
-    'Prepare linking existing assets to a Performance Max asset group. Returns a preview and confirmation token.',
+    'Link existing assets to a Performance Max asset group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      asset_group_id: z.string().describe('Existing asset group ID'),
+      customer_id: z.string(),
+      asset_group_id: z.string(),
       assets: z.array(z.object({
-        asset_id: z.string().describe('Existing asset ID'),
-        field_type: assetFieldTypeSchema.describe('Asset group field type, e.g. HEADLINE, MARKETING_IMAGE, YOUTUBE_VIDEO'),
-      })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION).describe('Assets to link to the asset group'),
+        asset_id: z.string(),
+        field_type: assetFieldTypeSchema.describe('e.g. HEADLINE, MARKETING_IMAGE'),
+      })).min(1).max(MAX_ASSET_GROUP_ASSETS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, assets, safe_word }) => {
@@ -408,11 +408,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_asset_group_signals',
-    'Prepare linking asset group signals to a Performance Max asset group. Returns a preview and confirmation token.',
+    'Add search-theme or audience signals to a Performance Max asset group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      asset_group_id: z.string().describe('Existing asset group ID'),
-      signals: z.array(assetGroupSignalSchema).min(1).max(MAX_ASSET_GROUP_SIGNALS_PER_MUTATION).describe('Signals to link to the asset group. Supported types: SEARCH_THEME and AUDIENCE.'),
+      customer_id: z.string(),
+      asset_group_id: z.string(),
+      signals: z.array(assetGroupSignalSchema).min(1).max(MAX_ASSET_GROUP_SIGNALS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, signals, safe_word }) => {
@@ -452,11 +452,11 @@ export function registerAssetPrepareTools(server: McpServer, cfg: AdsConfig): vo
 
   server.tool(
     'prepare_asset_group_listing_groups',
-    'Prepare creation of Performance Max asset group listing group trees. Returns a preview and confirmation token.',
+    'Create a Performance Max listing group tree.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      asset_group_id: z.string().describe('Existing asset group ID'),
-      nodes: z.array(listingGroupNodeSchema).min(2).max(MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION).describe('Tree nodes in parent-first order. Node 0 must be the root subdivision.'),
+      customer_id: z.string(),
+      asset_group_id: z.string(),
+      nodes: z.array(listingGroupNodeSchema).min(2).max(MAX_ASSET_GROUP_LISTING_GROUP_NODES_PER_MUTATION).describe('Parent-first; node 0 is the root subdivision'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, asset_group_id, nodes, safe_word }) => {

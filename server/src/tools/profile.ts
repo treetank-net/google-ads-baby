@@ -76,7 +76,7 @@ export const TOOL_PROFILE: Record<string, ToolProfile> = {
 
 export function normalizeProfile(value: string | undefined): ToolProfile {
   const lowered = (value ?? '').trim().toLowerCase();
-  return lowered === 'read' || lowered === 'manage' ? lowered : 'full';
+  return lowered === 'manage' || lowered === 'full' ? lowered : 'read';
 }
 
 export function isToolAllowed(name: string, profile: ToolProfile): boolean {
@@ -87,10 +87,10 @@ export function isToolAllowed(name: string, profile: ToolProfile): boolean {
 
 export function profileNotice(profile: ToolProfile): string {
   if (profile === 'read') {
-    return 'GOOGLE_ADS_BABY_PROFILE=read: this server exposes read and diagnostic tools only. No prepare_*/confirm_* tools are registered, so mutations are impossible in this session — do not look for another way to change the account. Tell the user to set GOOGLE_ADS_BABY_PROFILE=manage (edits to existing entities) or full (creation, assets, composite builders) and restart the MCP server.';
+    return 'Profile read: read-only tools, mutations are impossible in this session. To change the account the user must set GOOGLE_ADS_BABY_PROFILE=manage or full and restart the server.';
   }
   if (profile === 'manage') {
-    return 'GOOGLE_ADS_BABY_PROFILE=manage: budget, bid, status and text edits to existing entities are available; campaign/ad-group/ad creation, asset tools, cloning and the composite *_full builders are not registered. If the user asks to create something, say the profile excludes it and that GOOGLE_ADS_BABY_PROFILE=full plus an MCP restart enables it — do not improvise a workaround.';
+    return 'Profile manage: edits to existing entities only. Creation, assets, cloning and *_full builders need GOOGLE_ADS_BABY_PROFILE=full and a restart; do not improvise a workaround.';
   }
   return '';
 }

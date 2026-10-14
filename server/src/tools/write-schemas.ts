@@ -17,18 +17,18 @@ export const MAX_BID_MODIFIER = 5.0;
 export const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 export const safeWordSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_-]{2,39}$/, 'safe_word must be one short ASCII word, 3-40 chars, no spaces')
-  .describe('Random word you invent and show the user; they must repeat it to confirm');
+  ;
 export const campaignRefSchema = z.object({
-  campaign_id: z.string().describe('Campaign ID'),
-  campaign_name: z.string().describe('Campaign name for preview'),
+  campaign_id: z.string(),
+  campaign_name: z.string(),
 });
 export const displayAssetIdListSchema = z.array(z.string()).min(1).max(15);
 export const displayLogoAssetIdListSchema = z.array(z.string()).max(5);
 export const cloneEntitySchema = z.enum(['ad', 'ad_group', 'campaign']);
 export const keywordMatchTypeSchema = z.enum(['BROAD', 'PHRASE', 'EXACT']);
 export const keywordSchema = z.object({
-  text: z.string().min(1).max(80).describe('Keyword text, max 80 chars'),
-  match_type: keywordMatchTypeSchema.describe('Keyword match type'),
+  text: z.string().min(1).max(80),
+  match_type: keywordMatchTypeSchema,
 });
 export const negativeKeywordLevelSchema = z.enum(['campaign', 'ad_group']);
 export const entityStatusSchema = z.enum(['ENABLED', 'PAUSED']);
@@ -70,8 +70,8 @@ export const campaignAssetFieldTypeSchema = z.enum([
   'BUSINESS_NAME',
 ]);
 export const campaignAssetSchema = z.object({
-  asset_id: z.string().describe('Existing asset ID (from prepare_image_asset_* or execute_gaql)'),
-  field_type: campaignAssetFieldTypeSchema.describe('Asset field type for campaign-level linking, e.g. AD_IMAGE for image extensions in Search'),
+  asset_id: z.string(),
+  field_type: campaignAssetFieldTypeSchema.describe('e.g. AD_IMAGE'),
 });
 export const adGroupAssetFieldTypeSchema = z.enum([
   'HEADLINE',
@@ -85,13 +85,13 @@ export const adGroupAssetFieldTypeSchema = z.enum([
   'PRICE',
 ]);
 export const adGroupAssetSchema = z.object({
-  asset_id: z.string().describe('Existing asset ID'),
-  field_type: adGroupAssetFieldTypeSchema.describe('Asset field type for ad group-level linking'),
+  asset_id: z.string(),
+  field_type: adGroupAssetFieldTypeSchema,
 });
 export const assetGroupSignalSchema = z.object({
   type: z.enum(['SEARCH_THEME', 'AUDIENCE']),
-  text: z.string().min(1).max(50).optional().describe('Search theme text, required when type=SEARCH_THEME'),
-  audience_id: z.string().regex(/^\d+$/).optional().describe('Audience ID, required when type=AUDIENCE'),
+  text: z.string().min(1).max(50).optional().describe('For SEARCH_THEME'),
+  audience_id: z.string().regex(/^\d+$/).optional().describe('For AUDIENCE'),
 });
 export const listingGroupFilterTypeSchema = z.enum(['SUBDIVISION', 'UNIT_INCLUDED', 'UNIT_EXCLUDED']);
 export const listingGroupSourceSchema = z.enum(['SHOPPING', 'WEBPAGE']);

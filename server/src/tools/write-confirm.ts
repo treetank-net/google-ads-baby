@@ -21,7 +21,7 @@ import { executeMutation, formatMutationError } from './write-executor.js';
 export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
     'get_safety_setup',
-    'Explain the current mutation safety model and how to install Codex hooks if plugin-local hooks are not active.',
+    'Explain the mutation safety model and hook installation.',
     {},
     async () => ({
       content: [{
@@ -49,10 +49,10 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'confirm_safe_word',
-    'Test-only fallback for confirming a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1. Normal use should rely on user-message hooks.',
+    'Test-only: confirm a safe word when GOOGLE_ADS_ENABLE_MANUAL_CONFIRM=1.',
     {
-      token: z.string().describe('Confirmation token from prepare_* response'),
-      safe_word: z.string().min(1).describe('Exact safe word shown in prepare_* response'),
+      token: z.string(),
+      safe_word: z.string().min(1),
     },
     async ({ token, safe_word }) => {
       const result = confirmPendingSafeWord(token, safe_word);
@@ -65,9 +65,9 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'confirm_mutation',
-    'Execute a previously prepared mutation. Requires a valid, non-expired token from a prepare_* call. The user MUST have explicitly confirmed the action.',
+    'Execute a prepared mutation or batch after the user replied with its safe word.',
     {
-      token: z.string().describe('Confirmation token from prepare_* response'),
+      token: z.string(),
     },
     async ({ token }) => {
       const pendingMutation = getPendingToken(token);
@@ -104,10 +104,10 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'prepare_batch',
-    'Fold pending operations into ONE batch: one combined preview, one new server-minted safe word, one confirmation. Works across earlier prepare_* calls with different safe words. Show the preview, get that word from the user, then confirm_mutation(batch token) runs them in order. Folded tokens leave the queue.',
+    'Fold pending tokens into one batch: one preview, one new server-generated safe word.',
     {
       tokens: z.array(z.string()).min(2).max(50)
-        .describe('Tokens from earlier prepare_* calls, in the order they should run. Use list_pending_mutations to see what is still pending.'),
+        .describe('In run order'),
     },
     async ({ tokens }) => {
       const batch = createBatchToken(tokens);
@@ -120,10 +120,10 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'discard_pending_mutations',
-    'Drop pending operations without executing them. Nothing reaches Google Ads, so no safe word is needed. Omit tokens to clear the queue; a batch token drops its contents too.',
+    'Drop pending operations without executing them. Omit tokens to clear all.',
     {
       tokens: z.array(z.string()).min(1).max(50).optional()
-        .describe('Tokens to drop. Omit to clear every pending operation.'),
+        .describe('Omit to clear all'),
     },
     async ({ tokens }) => {
       const { discarded, missing } = discardTokens(tokens);
@@ -144,9 +144,9 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'unfold_batch',
-    'Split a batch back into separate pending operations under one new safe word. To fix one operation: unfold, discard_pending_mutations the wrong one, prepare a corrected one, prepare_batch again.',
+    'Split a batch back into separate pending operations.',
     {
-      token: z.string().describe('Batch token returned by prepare_batch'),
+      token: z.string(),
     },
     async ({ token }) => {
       const result = unfoldBatch(token);
@@ -170,9 +170,9 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'confirm_all_mutations',
-    'Execute ALL pending mutations in one batch. Use the same safe_word across multiple prepare_* calls, show combined preview, get one user confirmation, then call this. Requires user confirmation via safe word before calling.',
+    'Execute several prepared mutations that share one confirmed safe word.',
     {
-      tokens: z.array(z.string()).min(1).max(50).describe('Array of confirmation tokens from prepare_* responses'),
+      tokens: z.array(z.string()).min(1).max(50),
     },
     async ({ tokens }) => {
       const validated: PendingMutation[] = [];
@@ -220,7 +220,7 @@ export function registerConfirmTools(server: McpServer, cfg: AdsConfig): void {
 
   server.tool(
     'list_pending_mutations',
-    'List all pending (unconfirmed) mutations with their previews and tokens',
+    'List pending (unconfirmed) mutations.',
     {},
     async () => {
       const items = listPending();

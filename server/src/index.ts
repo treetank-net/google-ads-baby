@@ -6,6 +6,7 @@ import { registerWriteTools } from './tools/write.js';
 import { registerAuthTools } from './tools/auth.js';
 import { withProfile, profileNotice } from './tools/profile.js';
 import { PLUGIN_VERSION } from './constants.js';
+import { compactToolListing } from './tools/compact-listing.js';
 
 async function main() {
   const cfg = await configFromEnv();
@@ -17,18 +18,19 @@ async function main() {
     instructions: [
       ...(notice ? [notice] : []),
       ...(cfg.toolProfile === 'full' ? [
-        'Work fast: prefer the composite *_full creation tools over chains of granular prepare_* calls.',
-        'To create a Search campaign use prepare_search_campaign_full (budget + campaign + ad groups + keywords + responsive search ads + extensions in ONE atomic transaction and ONE confirmation). Pass a preset (e.g. "ecommerce-search" or "leadgen-search") and only the variable fields; the preset fills match types and bidding. Presets carry no country or language: ask the user which markets the campaign targets and pass locations and languages as ISO codes (locations: ["PL"], languages: ["pl"]). Never assume a market. Do NOT call prepare_search_campaign + prepare_ad_group + prepare_keywords separately for a brand-new campaign.',
-        'Similarly prefer prepare_display_campaign_full and prepare_performance_max_campaign_full for whole Display / Performance Max campaigns.',
-        'New campaigns are created PAUSED by default. After creation, ask the user whether to enable them.',
+        'Build new campaigns with the *_full tools (one atomic confirm) instead of chains of granular prepare_* calls; pass a preset and only the variable fields.',
+        'Presets carry no market: ask the user which locations and languages to target (ISO codes). New entities are created PAUSED; ask before enabling them.',
       ] : []),
       ...(cfg.toolProfile === 'read' ? [] : [
-        'When preparing several changes at once, call the prepare_* tools for all of them first, then ask the user to confirm once, then run confirm_all_mutations with all tokens — a single confirmation covers the whole batch.',
-        'Prepared separately, under different safe words? prepare_batch(tokens) gives one preview and one server-generated safe word for all of them; confirm_mutation(batch token) runs them in order. Every prepare_* reports what else is queued — batch instead of confirming one change at a time. list_pending_mutations = the queue, discard_pending_mutations = drop without touching the account, unfold_batch = split a batch to fix one operation.',
-        'Each prepare_* returns a preview and an LLM-invented safe word: show the full preview to the user and ask them to reply with the safe word before calling confirm_mutation / confirm_all_mutations. Never call prepare_* and confirm in the same turn.',
+        'Mutations: every prepare_* takes safe_word (a short random ASCII word you invent, 3-40 chars, no spaces) and returns a preview and token without changing anything.',
+        'Show the full preview, ask the user to reply with the safe word, and only then call confirm_mutation or confirm_all_mutations, never in the same turn.',
+        'Prepare several changes first and confirm once: reuse one safe word, or fold tokens with prepare_batch. list_pending_mutations, discard_pending_mutations and unfold_batch manage the queue.',
+        '*_name and label params next to an id only label the preview.',
       ]),
-      'List-shaped read tools return tab-separated tables and are paginated by response size: the response says which page of how many, and page: N asks for the next slice. Nothing is silently dropped.',
-      'Every *_amount field and every amount in a preview or report is in the account currency, never converted — list_accounts shows each account currency, and analysis reports repeat it. Safety caps and diagnostic cost thresholds are scaled to that currency, so the same number means different things on a PLN and a HUF account. Never state an amount in a currency the account does not use.',
+      'customer_id is the 10-digit account id from list_accounts.',
+      'List tools return paginated TSV: page: N gets the next slice, page_chars changes the page size.',
+      'Amounts (*_amount fields, previews, reports) are in the account currency shown by list_accounts, never converted, and capped by server safety limits scaled to that currency.',
+      'The google-ads-manual skill documents each tool in detail.',
     ].join(' '),
   });
 
@@ -37,6 +39,7 @@ async function main() {
   registerAuthTools(target, cfg);
   registerReadTools(target, cfg);
   registerWriteTools(target, cfg);
+  compactToolListing(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -38,13 +38,13 @@ import {
 export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void {
   server.tool(
     'prepare_responsive_search_ad',
-    'Prepare creation of a paused responsive search ad under an existing ad group. Returns a preview and confirmation token.',
+    'Create a paused responsive search ad.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Existing ad group ID'),
-      headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('3-15 responsive search ad headlines, max 30 chars each'),
-      descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('2-4 responsive search ad descriptions, max 90 chars each'),
-      final_url: z.string().url().describe('Landing page URL'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      headlines: z.array(z.string().min(1).max(30)).min(3).max(15),
+      descriptions: z.array(z.string().min(1).max(90)).min(2).max(4),
+      final_url: z.string().url(),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, headlines, descriptions, final_url, safe_word }) => {
@@ -71,18 +71,18 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_responsive_display_ad',
-    'Prepare creation of a paused responsive display ad under an existing ad group. Returns a preview and confirmation token.',
+    'Create a paused responsive display ad.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Existing ad group ID'),
-      business_name: z.string().min(1).max(25).describe('Business name, max 25 chars'),
-      headlines: z.array(z.string().min(1).max(30)).min(1).max(5).describe('1-5 short headlines, max 30 chars each'),
-      long_headline: z.string().min(1).max(90).describe('Long headline, max 90 chars'),
-      descriptions: z.array(z.string().min(1).max(90)).min(1).max(5).describe('1-5 descriptions, max 90 chars each'),
-      final_url: z.string().url().describe('Landing page URL'),
-      marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 IMAGE asset IDs, e.g. ["123","456"]'),
-      square_marketing_image_asset_ids: displayAssetIdListSchema.describe('1-15 square IMAGE asset IDs'),
-      logo_image_asset_ids: displayLogoAssetIdListSchema.describe('Optional logo IMAGE asset IDs, up to 5'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      business_name: z.string().min(1).max(25),
+      headlines: z.array(z.string().min(1).max(30)).min(1).max(5),
+      long_headline: z.string().min(1).max(90),
+      descriptions: z.array(z.string().min(1).max(90)).min(1).max(5),
+      final_url: z.string().url(),
+      marketing_image_asset_ids: displayAssetIdListSchema,
+      square_marketing_image_asset_ids: displayAssetIdListSchema,
+      logo_image_asset_ids: displayLogoAssetIdListSchema,
       safe_word: safeWordSchema,
     },
     async ({
@@ -143,21 +143,21 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_clone_entity',
-    'Prepare cloning a supported Google Ads entity as paused. Currently supports entity="ad" for responsive search/display ads.',
+    'Clone a responsive search or display ad as paused, optionally replacing text, URL or images.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      entity: cloneEntitySchema.describe('Entity kind to clone. Currently only ad is implemented.'),
-      source_ad_id: z.string().optional().describe('Source ad ID. Use this or source_ad_group_ad_resource_name for entity=ad.'),
-      source_ad_group_ad_resource_name: z.string().optional().describe('Full source ad group ad resource name, e.g. customers/123/adGroupAds/456~789. Preferred for entity=ad.'),
-      target_ad_group_id: z.string().optional().describe('Target ad group ID. Defaults to the source ad group for entity=ad.'),
-      final_url: z.string().url().optional().describe('Optional replacement landing page URL. Defaults to the source ad final URL.'),
-      business_name: z.string().min(1).max(25).optional().describe('Optional replacement business name for responsive display ads.'),
-      headlines: z.array(z.string().min(1)).optional().describe('Optional replacement headlines. Required counts depend on ad type.'),
-      long_headline: z.string().min(1).max(90).optional().describe('Optional replacement long headline for responsive display ads.'),
-      descriptions: z.array(z.string().min(1)).optional().describe('Optional replacement descriptions. Required counts depend on ad type.'),
-      marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement marketing image asset IDs for responsive display ads.'),
-      square_marketing_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement square marketing image asset IDs for responsive display ads.'),
-      logo_image_asset_ids: z.array(z.string()).optional().describe('Optional replacement logo image asset IDs for responsive display ads.'),
+      customer_id: z.string(),
+      entity: cloneEntitySchema,
+      source_ad_id: z.string().optional().describe('Or source_ad_group_ad_resource_name'),
+      source_ad_group_ad_resource_name: z.string().optional().describe('Preferred, e.g. customers/1/adGroupAds/2~3'),
+      target_ad_group_id: z.string().optional().describe('Default: the source ad group'),
+      final_url: z.string().url().optional(),
+      business_name: z.string().min(1).max(25).optional(),
+      headlines: z.array(z.string().min(1)).optional(),
+      long_headline: z.string().min(1).max(90).optional(),
+      descriptions: z.array(z.string().min(1)).optional(),
+      marketing_image_asset_ids: z.array(z.string()).optional(),
+      square_marketing_image_asset_ids: z.array(z.string()).optional(),
+      logo_image_asset_ids: z.array(z.string()).optional(),
       safe_word: safeWordSchema,
     },
     async ({
@@ -282,11 +282,11 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_keywords',
-    'Prepare creation of enabled search keywords in an existing ad group. Returns a preview and confirmation token.',
+    'Add keywords to a Search ad group.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Existing Search ad group ID'),
-      keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, keywords, safe_word }) => {
@@ -317,15 +317,15 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_keyword_status',
-    'Prepare status change (enable/pause/remove) for existing keywords in an ad group. Returns a preview and confirmation token.',
+    'Enable, pause or remove keywords.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Ad group ID containing the keywords'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
       keywords: z.array(z.object({
-        criterion_id: z.string().describe('Keyword criterion ID (from execute_gaql or list_ads_entities)'),
-        label: z.string().describe('Keyword text for preview, e.g. "BROAD: transport services"'),
-        new_status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']).describe('Target status'),
-      })).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Keywords to update'),
+        criterion_id: z.string(),
+        label: z.string().describe('Preview label'),
+        new_status: z.enum(['ENABLED', 'PAUSED', 'REMOVED']),
+      })).min(1).max(MAX_KEYWORDS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, keywords, safe_word }) => {
@@ -357,14 +357,14 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_ad_update',
-    'Prepare an update to an existing responsive search or responsive display ad (status, final URL, headlines, descriptions). Reads the current creative first and previews it as before -> after. Returns a preview and confirmation token. The user MUST confirm before the change is applied.',
+    'Update an RSA or RDA\'s status, URL, headlines or descriptions; preview shows before -> after.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_id: z.string().describe('Existing ad ID (from execute_gaql or list_ads_entities)'),
-      status: entityStatusSchema.optional().describe('New ad status'),
-      final_url: z.string().url().optional().describe('New landing page URL'),
-      headlines: z.array(z.string().min(1)).optional().describe('Replacement headlines; replaces the full list. Search ads need 3-15, display ads 1-5, max 30 chars each.'),
-      descriptions: z.array(z.string().min(1)).optional().describe('Replacement descriptions; replaces the full list. Search ads need 2-4, display ads 1-5, max 90 chars each.'),
+      customer_id: z.string(),
+      ad_id: z.string(),
+      status: entityStatusSchema.optional(),
+      final_url: z.string().url().optional(),
+      headlines: z.array(z.string().min(1)).optional().describe('Replaces the list. RSA 3-15, RDA 1-5, max 30 chars'),
+      descriptions: z.array(z.string().min(1)).optional().describe('Replaces the list. RSA 2-4, RDA 1-5, max 90 chars'),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_id, status, final_url, headlines, descriptions, safe_word }) => {
@@ -422,13 +422,13 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_ad_status',
-    'Prepare status change (enable/pause) for an existing ad. Returns a preview and confirmation token.',
+    'Enable or pause an ad.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      ad_group_id: z.string().describe('Ad group ID containing the ad'),
-      ad_id: z.string().describe('Ad ID (from execute_gaql or list_ads_entities)'),
-      ad_name: z.string().describe('Ad description for preview, e.g. "RSA: Transport | Logistics | ..."'),
-      new_status: z.enum(['ENABLED', 'PAUSED']).describe('Target status'),
+      customer_id: z.string(),
+      ad_group_id: z.string(),
+      ad_id: z.string(),
+      ad_name: z.string().describe('Preview label'),
+      new_status: z.enum(['ENABLED', 'PAUSED']),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, ad_group_id, ad_id, ad_name, new_status, safe_word }) => {
@@ -451,13 +451,13 @@ export function registerAdPrepareTools(server: McpServer, cfg: AdsConfig): void 
 
   server.tool(
     'prepare_negative_keywords',
-    'Prepare creation of negative keywords at campaign or ad group level. Returns a preview and confirmation token.',
+    'Add negative keywords at campaign or ad group level.',
     {
-      customer_id: z.string().describe('Google Ads customer ID from list_accounts'),
-      level: negativeKeywordLevelSchema.describe('Where to add negatives: campaign or ad_group'),
-      campaign_id: z.string().optional().describe('Campaign ID, required when level=campaign'),
-      ad_group_id: z.string().optional().describe('Ad group ID, required when level=ad_group'),
-      keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION).describe('Negative keywords to add, each with text and match_type BROAD, PHRASE, or EXACT'),
+      customer_id: z.string(),
+      level: negativeKeywordLevelSchema,
+      campaign_id: z.string().optional().describe('Required when level=campaign'),
+      ad_group_id: z.string().optional().describe('Required when level=ad_group'),
+      keywords: z.array(keywordSchema).min(1).max(MAX_KEYWORDS_PER_MUTATION),
       safe_word: safeWordSchema,
     },
     async ({ customer_id, level, campaign_id, ad_group_id, keywords, safe_word }) => {

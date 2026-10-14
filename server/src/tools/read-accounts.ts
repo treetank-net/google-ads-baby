@@ -25,7 +25,7 @@ import {
 export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
     'list_accounts',
-    'List all Google Ads accounts under the MCC',
+    'List accessible Google Ads accounts with their currency.',
     {
       page: pageSchema,
       page_chars: pageCharsSchema,
@@ -47,10 +47,10 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_campaigns',
-    'Get campaigns with performance metrics for a specific account. Lists every campaign except REMOVED ones, including campaigns that served nothing in the window — those show zero metrics.',
+    'Campaigns with performance metrics, including zero-activity ones (REMOVED excluded).',
     {
-      customer_id: z.string().describe('Google Ads customer ID (e.g. "1234567890")'),
-      days: z.enum(['7', '30']).default('30').describe('Lookback period'),
+      customer_id: z.string(),
+      days: z.enum(['7', '30']).default('30'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -78,11 +78,11 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'execute_gaql',
-    'Run an arbitrary GAQL query against a Google Ads account (read-only)',
+    'Run a read-only GAQL query. The gaql skill covers syntax pitfalls.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      query: z.string().describe('GAQL query (SELECT ... FROM ... WHERE ...)'),
-      format: z.enum(['tsv', 'json']).default('tsv').describe('tsv (default) is compact and decodes enum numbers to names; json returns the raw API rows and costs several times more context'),
+      customer_id: z.string(),
+      query: z.string(),
+      format: z.enum(['tsv', 'json']).default('tsv').describe('tsv (default) or json (raw rows, several times larger)'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -110,9 +110,9 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_build_context',
-    'One-shot read of everything needed to build or extend campaigns on an account: campaigns (id/name/type/status/budget), ad groups (id/name/campaign), enabled conversion actions (needed for conversion-based bidding), and reusable image assets. Call this ONCE before creating ads instead of several separate list/query round-trips.',
+    'One call before building: campaigns, ad groups, enabled conversion actions, reusable image assets.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
+      customer_id: z.string(),
     },
     async ({ customer_id }) => {
       const validationError = requireCustomerId(customer_id);
@@ -166,17 +166,17 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'list_ads_entities',
-    'List Google Ads entities with optional filters and relationship context. Use this instead of broad account inspection on large accounts.',
+    'List campaigns, ad groups, ads, keywords, negatives, assets or ad-asset links, with filters. No metrics.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      entity: entitySchema.describe('What to list: campaigns, ad_groups, ads, keywords, negative_keywords, assets, or ad_asset_links. negative_keywords returns campaign-level negatives unless ad_group_id is given, which switches it to that ad group\'s negatives.'),
-      campaign_id: z.string().optional().describe('Optional campaign ID filter'),
-      ad_group_id: z.string().optional().describe('Optional ad group ID filter'),
-      status: upperTokenSchema.optional().describe('Optional status filter, e.g. ENABLED, PAUSED, REMOVED. For ad_asset_links use TRUE or FALSE to filter enabled links.'),
-      type: upperTokenSchema.optional().describe('Optional entity type filter, e.g. SEARCH, DISPLAY, RESPONSIVE_SEARCH_AD, IMAGE. For keywords and negative_keywords this filters the match type: EXACT, PHRASE or BROAD.'),
-      subtype: upperTokenSchema.optional().describe('Optional campaign advertising channel subtype filter, e.g. DISPLAY_GMAIL_AD, SEARCH_MOBILE_APP'),
-      name_contains: z.string().min(1).max(120).optional().describe('Optional case-sensitive substring filter on the entity name, or on the keyword text for keywords and negative_keywords'),
-      limit: z.number().int().min(1).max(5000).default(2000).describe('Upper bound on rows fetched from the API (default 2000, max 5000). The response itself is split into pages by size, so this is a fetch bound, not a display bound.'),
+      customer_id: z.string(),
+      entity: entitySchema.describe('negative_keywords are campaign-level unless ad_group_id is given'),
+      campaign_id: z.string().optional(),
+      ad_group_id: z.string().optional(),
+      status: upperTokenSchema.optional().describe('e.g. ENABLED, PAUSED; TRUE/FALSE for ad_asset_links'),
+      type: upperTokenSchema.optional().describe('Channel, ad or asset type; match type for keywords'),
+      subtype: upperTokenSchema.optional().describe('Channel subtype, e.g. DISPLAY_GMAIL_AD'),
+      name_contains: z.string().min(1).max(120).optional().describe('Case-sensitive substring of the name or keyword text'),
+      limit: z.number().int().min(1).max(5000).default(2000).describe('API fetch cap (default 2000, max 5000)'),
       page: pageSchema,
       page_chars: pageCharsSchema,
     },
@@ -213,11 +213,11 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'get_ad_blueprint',
-    'Get one ad with campaign/ad group context, linked assets, and a clone-ready input shape for supported ad types.',
+    'One ad with its context, linked assets and a clone-ready input.',
     {
-      customer_id: z.string().describe('Google Ads customer ID'),
-      ad_id: z.string().optional().describe('Ad ID. Use this or ad_group_ad_resource_name.'),
-      ad_group_ad_resource_name: z.string().optional().describe('Full ad group ad resource name, e.g. customers/123/adGroupAds/456~789. Use this when available.'),
+      customer_id: z.string(),
+      ad_id: z.string().optional().describe('Or ad_group_ad_resource_name'),
+      ad_group_ad_resource_name: z.string().optional().describe('Preferred, e.g. customers/1/adGroupAds/2~3'),
     },
     async (input) => {
       const validationError = requireCustomerId(input.customer_id);
