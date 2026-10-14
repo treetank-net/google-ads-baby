@@ -11,6 +11,7 @@ import {
   upperTokenSchema,
   adFilter,
   MAX_FETCH_LIMIT,
+  FILE_FETCH_LIMIT,
   resourceNameLiteral,
   buildAdBlueprint,
   buildAdQuery,
@@ -173,7 +174,8 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       }
       try {
         const cid = normalizeCustomerId(input.customer_id);
-        const rows = await executeGaql(cfg, cid, buildListQuery({ ...input, limit: MAX_FETCH_LIMIT })) as unknown[];
+        const fetchLimit = output === 'file' ? FILE_FETCH_LIMIT : MAX_FETCH_LIMIT;
+        const rows = await executeGaql(cfg, cid, buildListQuery({ ...input, limit: fetchLimit }, fetchLimit)) as unknown[];
         const needsCurrency = input.entity === 'ad_groups' || input.entity === 'keywords';
         const currency = needsCurrency ? await getAccountCurrency(cfg, cid) : undefined;
         const text = tableDocument({
@@ -182,7 +184,7 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
           currency,
           rows: normalizeRows(rows),
           shape: { fields, order_by, limit, page, page_chars, output },
-          extraNotes: rows.length >= MAX_FETCH_LIMIT ? [`fetched the API maximum of ${MAX_FETCH_LIMIT} rows; narrow with campaign_id, ad_group_id, status or name_contains`] : [],
+          extraNotes: rows.length >= fetchLimit ? [`capped at ${fetchLimit} rows; narrow with campaign_id, ad_group_id, status or name_contains`] : [],
         });
         return { content: [{ type: 'text', text }] };
       } catch (err) {

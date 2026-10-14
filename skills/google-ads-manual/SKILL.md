@@ -94,7 +94,7 @@ Print only the aggregate you need; do not `cat` the whole file back into context
 - `negative_keywords` returns campaign-level negatives. With `ad_group_id` it returns that ad group's negatives instead.
 - `type` filters the channel, ad or asset type. For keywords it filters the match type (EXACT, PHRASE, BROAD).
 - `status` takes TRUE or FALSE for `ad_asset_links`.
-- It fetches up to 5000 rows. `limit` is the top-N shown, and the header says when the fetch hit 5000.
+- It fetches up to 5000 rows (50,000 with `output: "file"`). `limit` is the top-N shown, and the header says `capped at N` when the fetch hit the cap.
 
 `execute_gaql` with `format: json` returns raw rows that are several times
 larger than TSV. Use it only when you need nested structures that TSV flattens

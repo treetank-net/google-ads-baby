@@ -17,9 +17,11 @@ export function gaqlString(value: string): string {
 
 export const DEFAULT_FETCH_LIMIT = 2000;
 export const MAX_FETCH_LIMIT = 5000;
+/** output: "file" never lands in context, so it may fetch far more rows. */
+export const FILE_FETCH_LIMIT = 50_000;
 
-export function normalizeLimit(limit: number | undefined): number {
-  return Math.max(1, Math.min(Math.floor(limit ?? DEFAULT_FETCH_LIMIT), MAX_FETCH_LIMIT));
+export function normalizeLimit(limit: number | undefined, max = MAX_FETCH_LIMIT): number {
+  return Math.max(1, Math.min(Math.floor(limit ?? DEFAULT_FETCH_LIMIT), max));
 }
 
 export const pageSchema = z.number().int().positive().optional()
@@ -290,9 +292,9 @@ export function buildListQuery(input: {
   subtype?: string;
   name_contains?: string;
   limit?: number;
-}) {
+}, maxLimit = MAX_FETCH_LIMIT) {
   const filters: string[] = [];
-  const limit = normalizeLimit(input.limit);
+  const limit = normalizeLimit(input.limit, maxLimit);
 
   switch (input.entity) {
     case 'campaigns':
