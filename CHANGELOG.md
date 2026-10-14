@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.24.0
+
+### Changed — token diet (see marketing-context-mcp `docs/response-format-contract.md`)
+- **Default profile is now `read`.** Mutation tools register only with an explicit `manage`/`full` profile; an unknown value falls back to `read`.
+- **One-line tool descriptions**, parameter descriptions ≤100 chars, compact `tools/list` schemas. Details moved to the manual skill.
+- **Server-shaped tables.** List tools return TSV with short column names, real currency amounts (no micros/cents), `*_pct` ratios, decoded enums, constant columns hoisted to a header, and totals over all matching rows.
+- **Shaping parameters** `fields`, `order_by`, `limit`, `min_cost`/`min_impressions`/`min_clicks`, `summary`, `page`/`page_chars` (default page ≈12k chars). Truncation is always declared in the header.
+- **Prepare/confirm responses are plain text**; mutation history returns params only with `include_params: true`.
+- `get_ad_blueprint` carries each ad text once (in `clone_input`); per-text labels move to `text_notes`.
+- Analysis reports are TSV findings; `list_accounts`, `get_build_context`, `list_ads_entities` (top-N over a 5000-row fetch) and `execute_gaql` (compact paginated JSON) share the table format.
+- New skill `google-ads-manual`.
+
 ## v0.23.2
 
 ### Fixed
