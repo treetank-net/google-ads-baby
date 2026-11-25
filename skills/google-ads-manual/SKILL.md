@@ -242,7 +242,7 @@ cannot fix delivery there.
   audit log. History returns previews by default. Pass `include_params: true`
   for the full call params when you replicate an earlier campaign or reuse asset
   IDs.
-- **Profiles.** `GOOGLE_ADS_BABY_PROFILE=read` registers no mutation tools.
+- **Profiles.** Set by `"toolProfile"` in `~/.google-ads-baby/config.json` (Claude Desktop has no env vars; edit the file and restart the app) or `GOOGLE_ADS_BABY_PROFILE`. `read` registers no mutation tools.
   `manage` allows edits to existing entities. `full` adds creation, assets,
   cloning and the composite builders. Changing the profile requires a server
   restart.

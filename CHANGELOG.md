@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.1
+
+### Fixed
+- **Settings saved in `config.json` are no longer shadowed by unexpanded `${VAR}` placeholders.** Hosts that pass the manifest's `env` block literally (no shell expansion) left `GOOGLE_ADS_SAFETY_LEVEL`, `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` and `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` set to the placeholder text, so the saved safety level and TTLs were ignored by the confirm kernel and the safety hook. The server now drops every `GOOGLE_ADS_*` placeholder at start, and the hook ignores them.
+- Profile notices point to `"toolProfile"` in `~/.google-ads-baby/config.json`, which works in Claude Desktop, instead of only the environment variable.
+
 ## v0.26.0
 
 ### Added

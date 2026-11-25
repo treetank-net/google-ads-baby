@@ -53,9 +53,9 @@ function writeState(state) {
 
 const savedSafetyLevel = readConfig('safetyLevel');
 const savedStateTtl = readConfig('confirmStateTtlSeconds');
-const safetyLevel = process.env.GOOGLE_ADS_SAFETY_LEVEL || savedSafetyLevel || 'standard';
+const safetyLevel = validEnv('GOOGLE_ADS_SAFETY_LEVEL') || savedSafetyLevel || 'standard';
 
-let stateTtl = parseInt(process.env.GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS || savedStateTtl, 10);
+let stateTtl = parseInt(validEnv('GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS') || savedStateTtl, 10);
 if (isNaN(stateTtl)) {
   if (safetyLevel === 'strict') stateTtl = 300;
   else if (safetyLevel === 'off') stateTtl = 0;

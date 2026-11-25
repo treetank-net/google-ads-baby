@@ -75,7 +75,14 @@ export async function saveConfig(config: Partial<SavedConfig>): Promise<string> 
   return path;
 }
 
+export function dropUnexpandedPlaceholders(): void {
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name.startsWith('GOOGLE_ADS_') && value !== undefined && !isValidEnv(value)) delete process.env[name];
+  }
+}
+
 export async function configFromEnv(): Promise<AdsConfig> {
+  dropUnexpandedPlaceholders();
   const saved = await loadSavedConfig();
   const safetyLevel = env('GOOGLE_ADS_SAFETY_LEVEL') || saved.safetyLevel || 'standard';
   const mutationTokenTtlSeconds = env('GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS') || saved.mutationTokenTtlSeconds || '';

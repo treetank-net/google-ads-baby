@@ -89,10 +89,10 @@ export function isToolAllowed(name: string, profile: ToolProfile): boolean {
 
 export function profileNotice(profile: ToolProfile): string {
   if (profile === 'read') {
-    return 'Profile read: read-only tools, mutations are impossible in this session. To change the account the user must set GOOGLE_ADS_BABY_PROFILE=manage or full and restart the server.';
+    return 'Profile read: read-only tools, mutations are impossible in this session. To change the account, set "toolProfile": "manage" or "full" in ~/.google-ads-baby/config.json (or GOOGLE_ADS_BABY_PROFILE) and restart the app.';
   }
   if (profile === 'manage') {
-    return 'Profile manage: edits to existing entities only. Creation, assets, cloning and *_full builders need GOOGLE_ADS_BABY_PROFILE=full and a restart; do not improvise a workaround.';
+    return 'Profile manage: edits to existing entities only. Creation, new assets, cloning and *_full builders need "toolProfile": "full" in ~/.google-ads-baby/config.json and a restart; do not improvise a workaround.';
   }
   return '';
 }

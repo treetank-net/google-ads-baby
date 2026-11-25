@@ -76,6 +76,7 @@ import {
   discardTokens,
   generateSafeWord,
   getPendingToken,
+  getTokenTtlSeconds,
   listPending,
   consumeToken,
   resetConfirmGate,
@@ -151,6 +152,28 @@ async function testSaveLoadConfig() {
   assert('configFromEnv reads saved loginCustomerId', cfg.loginCustomerId === '9876543210');
 
   try { await unlink(path); } catch {}
+}
+
+async function testUnexpandedPlaceholders() {
+  console.log('\n--- Unexpanded ${VAR} placeholders from the host ---');
+
+  const keys = ['GOOGLE_ADS_SAFETY_LEVEL', 'GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS', 'GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS', 'GOOGLE_ADS_BABY_PROFILE'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = `\${${key}:-}`;
+  const path = await saveConfig({ safetyLevel: 'strict', mutationTokenTtlSeconds: '120', confirmStateTtlSeconds: '90', toolProfile: 'manage' });
+  try {
+    const cfg = await configFromEnv();
+    assert('a saved profile wins over an unexpanded placeholder', cfg.toolProfile === 'manage', cfg.toolProfile);
+    assert('a saved safety level reaches the confirm kernel', process.env['GOOGLE_ADS_SAFETY_LEVEL'] === 'strict', String(process.env['GOOGLE_ADS_SAFETY_LEVEL']));
+    assert('a saved token TTL reaches the confirm kernel', getTokenTtlSeconds() === 120, String(getTokenTtlSeconds()));
+    assert('no GOOGLE_ADS_* variable keeps a raw placeholder', !Object.entries(process.env).some(([key, value]) => key.startsWith('GOOGLE_ADS_') && value?.includes('${')));
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    try { await unlink(path); } catch {}
+  }
 }
 
 async function testAuthFlow() {
@@ -463,7 +486,8 @@ function testProfiles() {
   assert('an unknown tool name is allowed rather than silently hidden', isToolAllowed('some_future_tool', 'read'));
 
   assert('read profile states mutations are impossible', profileNotice('read').includes('mutations are impossible'));
-  assert('manage profile names the env var needed to unlock creation', profileNotice('manage').includes('GOOGLE_ADS_BABY_PROFILE=full'));
+  assert('manage profile names the config.json setting that unlocks creation', profileNotice('manage').includes('"toolProfile": "full"') && profileNotice('manage').includes('config.json'));
+  assert('read profile points hosts without env vars to config.json', profileNotice('read').includes('config.json'));
   assert('full profile adds no notice', profileNotice('full') === '');
 
   const pkgVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
@@ -1489,6 +1513,7 @@ async function main() {
 
   await testConfig();
   await testSaveLoadConfig();
+  await testUnexpandedPlaceholders();
   await testAuthFlow();
   testAnalysis();
   testFormat();
