@@ -84,13 +84,13 @@ import {
 } from '../src/confirm.js';
 import { enums } from 'google-ads-api';
 import { registerReadTools } from '../src/tools/read.js';
-import { registerAuthTools } from '../src/tools/auth.js';
+import { registerAuthTools, resolveUpdateFiles, isSafeUpdatePath, DEFAULT_UPDATE_FILES } from '../src/tools/auth.js';
 import { compactToolListing, compactSchema } from '../src/tools/compact-listing.js';
 import { renderReport } from '../src/tools/read-analysis.js';
 import { columnName, normalizeRows, shapeRows, tableDocument, layoutFor, ShapeError, DEFAULT_TABLE_PAGE_CHARS } from '../src/tools/table.js';
 import { TOOL_PROFILE, normalizeProfile, isToolAllowed, withProfile, profileNotice, type ToolProfile } from '../src/tools/profile.js';
 import { PLUGIN_VERSION } from '../src/constants.js';
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
 import {
   ASSET_LINK_LEVELS,
@@ -1502,6 +1502,30 @@ async function testAssetToolValidation() {
   assert('an asset update needs at least one field', empty.startsWith('Error:') && empty.includes('at least one field'), empty);
 }
 
+function testUpdateManifest() {
+  console.log('\n--- update_plugin file manifest ---');
+
+  const repoRoot = join(process.cwd(), '..');
+  const rootPackage = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+  assert('the root package.json declares updateFiles', Array.isArray(rootPackage.updateFiles));
+  const missing = (rootPackage.updateFiles ?? []).filter((path: string) => !existsSync(join(repoRoot, path)));
+  assert('every declared update file exists in the repo', missing.length === 0, missing.join(', '));
+  const unsafe = (rootPackage.updateFiles ?? []).filter((path: string) => !isSafeUpdatePath(path));
+  assert('every declared update file is a safe relative path', unsafe.length === 0, unsafe.join(', '));
+  const skills = readdirSync(join(repoRoot, 'skills')).map((name) => `skills/${name}/SKILL.md`).filter((path) => existsSync(join(repoRoot, path)));
+  const unshipped = skills.filter((path) => !rootPackage.updateFiles?.includes(path));
+  assert('every skill reaches clients through update_plugin', unshipped.length === 0, unshipped.join(', '));
+  assert('package.json is not in the list (it is written last, by the tool)', !rootPackage.updateFiles?.includes('package.json'));
+
+  const fallback = resolveUpdateFiles({});
+  assert('an old manifest without updateFiles keeps the built-in list', fallback.files.join() === DEFAULT_UPDATE_FILES.join());
+  const hostile = resolveUpdateFiles({ updateFiles: ['../../.bashrc', '/etc/passwd', 'skills/../x', 'a\\b', 'skills/ok/SKILL.md', 42, 'package.json'] });
+  assert('path traversal and absolute paths are rejected', hostile.rejected.length === 5, hostile.rejected.join(' | '));
+  assert('a safe path survives', hostile.files.includes('skills/ok/SKILL.md'));
+  assert('the bundle is always fetched even if the list forgets it', hostile.files.includes('server/bundle.cjs'));
+  assert('package.json is never fetched mid-list', !hostile.files.includes('package.json'));
+}
+
 async function main() {
   console.log('Smoke test: google-ads-baby MCP server\n');
 
@@ -1530,6 +1554,7 @@ async function main() {
   testToolContract();
   testBatchTokens();
   testTargeting();
+  testUpdateManifest();
   testAssetLinks();
   await testAssetToolValidation();
   await testCapEnforcement();

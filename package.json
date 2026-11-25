@@ -1,6 +1,6 @@
 {
   "name": "google-ads-baby",
-  "version": "0.26.1",
+  "version": "0.26.2",
   "type": "module",
   "description": "Google Ads MCP server with two-phase safety confirmations.",
   "author": "Jacek Mariański <jmarianski@trans.eu>",
@@ -9,5 +9,14 @@
     "type": "git",
     "url": "https://github.com/treetank-net/google-ads-baby"
   },
-  "private": true
+  "private": true,
+  "updateFiles": [
+    "server/bundle.cjs",
+    "hooks.json",
+    "scripts/safety-hook.js",
+    "scripts/start-mcp.js",
+    "CHANGELOG.md",
+    "skills/google-ads-manual/SKILL.md",
+    "skills/gaql/SKILL.md"
+  ]
 }

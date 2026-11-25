@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import type { AdsConfig } from '../config.js';
 import { startAuthFlow } from '../auth.js';
 import { PLUGIN_VERSION } from '../constants.js';
@@ -23,6 +23,7 @@ async function downloadFile(remotePath: string, localPath: string): Promise<bool
   if (!res.ok) return false;
   const staging = `${localPath}.download`;
   try {
+    mkdirSync(dirname(localPath), { recursive: true });
     writeFileSync(staging, Buffer.from(await res.arrayBuffer()));
     renameSync(staging, localPath);
     return true;
@@ -30,6 +31,30 @@ async function downloadFile(remotePath: string, localPath: string): Promise<bool
     rmSync(staging, { force: true });
     return false;
   }
+}
+
+export const DEFAULT_UPDATE_FILES = [
+  'server/bundle.cjs',
+  'hooks.json',
+  'scripts/safety-hook.js',
+  'scripts/start-mcp.js',
+  'CHANGELOG.md',
+];
+
+const REQUIRED_UPDATE_FILES = ['server/bundle.cjs'];
+const VERSION_FILE = 'package.json';
+
+export function isSafeUpdatePath(path: unknown): path is string {
+  if (typeof path !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(path)) return false;
+  if (path.startsWith('/') || path.endsWith('/')) return false;
+  return path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+export function resolveUpdateFiles(remotePackage: { updateFiles?: unknown }): { files: string[]; rejected: string[] } {
+  const declared = Array.isArray(remotePackage.updateFiles) ? remotePackage.updateFiles : DEFAULT_UPDATE_FILES;
+  const rejected = declared.filter((path) => !isSafeUpdatePath(path)).map((path) => String(path));
+  const files = [...new Set([...REQUIRED_UPDATE_FILES, ...declared.filter(isSafeUpdatePath)])].filter((path) => path !== VERSION_FILE);
+  return { files, rejected };
 }
 
 function restartPendingNote(installedVer: string): string {
@@ -116,7 +141,7 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
         if (!res.ok) {
           return { content: [{ type: 'text', text: `Cannot reach update server. ${restartPendingNote(installedVer)}` }] };
         }
-        const remote = await res.json() as { version?: string };
+        const remote = await res.json() as { version?: string; updateFiles?: unknown };
         const remoteVer = remote.version || '0.0.0';
 
         if (!semverGt(remoteVer, installedVer)) {
@@ -132,25 +157,27 @@ export function registerAuthTools(server: McpServer, cfg: AdsConfig) {
         const results: string[] = [];
         const changelog = await fetchChangelog(installedVer, remoteVer);
 
-        const files = [
-          ['server/bundle.cjs', join(root, 'server', 'bundle.cjs')],
-          ['package.json', join(root, 'package.json')],
-          ['hooks.json', join(root, 'hooks.json')],
-          ['scripts/safety-hook.js', join(root, 'scripts', 'safety-hook.js')],
-          ['scripts/start-mcp.js', join(root, 'scripts', 'start-mcp.js')],
-          ['CHANGELOG.md', join(root, 'CHANGELOG.md')],
-        ];
-        for (const [remote, local] of files) {
-          const ok = await downloadFile(remote, local);
-          results.push(`${remote}: ${ok ? 'OK' : 'FAILED'}`);
+        const { files, rejected } = resolveUpdateFiles(remote);
+        for (const remotePath of files) {
+          const ok = await downloadFile(remotePath, join(root, remotePath));
+          results.push(`${remotePath}: ${ok ? 'OK' : 'FAILED'}`);
+        }
+        for (const path of rejected) results.push(`${path}: SKIPPED (unsafe path in updateFiles)`);
+        const failed = results.filter((line) => line.endsWith('FAILED')).length;
+        if (failed) {
+          results.push(`${VERSION_FILE}: NOT UPDATED, ${failed} file(s) failed; the install stays at ${installedVer} so update_plugin can retry.`);
+        } else {
+          const ok = await downloadFile(VERSION_FILE, join(root, VERSION_FILE));
+          results.push(`${VERSION_FILE}: ${ok ? 'OK' : 'FAILED'}`);
         }
 
         return {
           content: [{
             type: 'text',
             text: [
-              `Downloaded ${installedVer} → ${remoteVer}`,
-              `Still running: ${PLUGIN_VERSION}. The new bundle activates on the next session start, not now.`,
+              ...(failed
+                ? [`Update ${installedVer} → ${remoteVer} incomplete: ${failed} file(s) failed. Run update_plugin again.`]
+                : [`Downloaded ${installedVer} → ${remoteVer}`, `Still running: ${PLUGIN_VERSION}. The new bundle activates on the next session start, not now.`]),
               ...(changelog ? ['', "What's new:", changelog] : []),
               '',
               ...results,

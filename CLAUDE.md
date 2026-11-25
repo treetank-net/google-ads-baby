@@ -287,6 +287,12 @@ OAuth redirect URI of the built-in Google client — do not change it here witho
   pobiera pliki runtime tylko wtedy, gdy nie ma bundla (stale cache CDN nadpisywał świeższą instalację starszymi plikami).
 - Bramka w `update_plugin` używa porównania semver, nie `!==` — kopia nowsza od serwera aktualizacji zostaje nietknięta.
 - Pobieranie jest atomowe (`<plik>.download` + `renameSync`).
+- **Lista plików do pobrania siedzi w `updateFiles` w głównym `package.json`**, nie w kodzie. Nowy plik, który klienci
+  mają dostać (skill, skrypt), dopisuje się tam w commicie release'u. `update_plugin` czyta listę ze **zdalnego**
+  `package.json` (i tak pobieranego do porównania wersji), więc działa od razu, bez zmiany kodu. Ścieżki tylko względne
+  (`isSafeUpdatePath`), `server/bundle.cjs` zawsze, `package.json` zawsze na końcu i tylko gdy reszta doszła — inaczej
+  częściowa instalacja udawałaby aktualną i retry by nie ruszył. Brak `updateFiles` = `DEFAULT_UPDATE_FILES` (stare manifesty).
+  Smoke pilnuje, że każdy wpis istnieje w repo i każdy `skills/*/SKILL.md` jest na liście.
 - `PLUGIN_VERSION` z `constants.ts` jest wkompilowany w bundle i służy do odróżnienia wersji POBRANEJ (package.json na dysku)
   od AKTYWNEJ (kod w pamięci procesu) — proces nie umie podmienić swojego bundla w locie.
 

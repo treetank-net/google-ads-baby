@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.2
+
+### Changed
+- **`update_plugin` downloads the files listed in `updateFiles` of the remote `package.json`** instead of a list compiled into the server. A release can ship new files (skills, scripts) without a code change; this release adds the `google-ads-manual` and `gaql` skills, so updated tool docs now reach installs that update through `update_plugin`. Paths must be relative; the bundle is always fetched; a manifest without the list falls back to the old one.
+- **`package.json` is written last and only when every other file arrived.** A partial download used to record the new version anyway, so the next `update_plugin` saw nothing to do; now the install stays at the old version and can be retried.
+
 ## v0.26.1
 
 ### Fixed
