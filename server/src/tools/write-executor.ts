@@ -29,6 +29,8 @@ import {
   linkAdGroupAssets,
   linkCampaignAssets,
   linkCampaignSharedSet,
+  linkCustomerAssets,
+  mutateAssetLinkStatus,
   mutateAdStatus,
   mutateBiddingStrategy,
   mutateCampaignBudget,
@@ -38,6 +40,7 @@ import {
   removeCampaigns,
   updateAd,
   updateAdGroup,
+  updateAsset,
   updateCampaign,
   updateCampaignConversionGoals,
   updateDemographicBidModifiers,
@@ -175,6 +178,26 @@ export async function executeMutation(cfg: AdsConfig, mutation: PendingMutation,
   if (mutation.action === 'campaign_assets_link') {
     return ok(await linkCampaignAssets(cfg, p.customer_id, p.campaign_id,
       p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'customer_assets_link') {
+    return ok(await linkCustomerAssets(cfg, p.customer_id,
+      p.assets.map((a: any) => ({ assetId: a.asset_id, fieldType: a.field_type }))));
+  }
+
+  if (mutation.action === 'asset_link_status') {
+    return ok(await mutateAssetLinkStatus(cfg, p.customer_id,
+      p.links.map((link: any) => ({ level: link.level, resourceName: link.resource_name })), p.new_status));
+  }
+
+  if (mutation.action === 'asset_update') {
+    return ok(await updateAsset(cfg, p.customer_id, p.asset_id, {
+      finalUrl: p.patch.final_url,
+      linkText: p.patch.link_text,
+      description1: p.patch.description1,
+      description2: p.patch.description2,
+      calloutText: p.patch.callout_text,
+    }));
   }
 
   if (mutation.action === 'ad_group_assets_link') {

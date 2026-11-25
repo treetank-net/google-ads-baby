@@ -13,6 +13,7 @@ export const MAX_CONVERSION_GOALS_PER_MUTATION = 50;
 export const MAX_AD_SCHEDULES_PER_MUTATION = 42;
 export const MAX_AD_GROUP_CRITERIA_PER_MUTATION = 100;
 export const MAX_NEGATIVE_TOPICS_PER_MUTATION = 100;
+export const MAX_ASSET_LINK_SCOPE_IDS = 100;
 export const MAX_BID_MODIFIER = 5.0;
 export const CODEX_HOOK_INSTALL_COMMAND = 'npx codex-marketplace add treetank-net/google-ads-baby/hooks/google-ads-baby-safety --hook --global';
 export const safeWordSchema = z.string()
@@ -32,6 +33,8 @@ export const keywordSchema = z.object({
 });
 export const negativeKeywordLevelSchema = z.enum(['campaign', 'ad_group']);
 export const entityStatusSchema = z.enum(['ENABLED', 'PAUSED']);
+export const assetLinkStatusSchema = z.enum(['ENABLED', 'PAUSED', 'REMOVED']);
+export const assetLinkFieldTypeSchema = z.string().regex(/^[A-Z_]+$/);
 export const biddingStrategyTypeSchema = z.enum([
   'TARGET_CPA',
   'TARGET_ROAS',

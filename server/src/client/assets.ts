@@ -319,6 +319,80 @@ export async function linkAdGroupAssets(
   })) as any);
 }
 
+export async function linkCustomerAssets(
+  cfg: AdsConfig,
+  customerId: string,
+  assets: Array<{ assetId: string; fieldType: string }>,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources(assets.map((asset) => ({
+    entity: 'customer_asset',
+    operation: 'create',
+    resource: {
+      asset: ResourceNames.asset(customerId, asset.assetId),
+      field_type: (enums.AssetFieldType as any)[asset.fieldType],
+    },
+  })) as any);
+}
+
+const ASSET_LINK_ENTITY = {
+  CUSTOMER: 'customer_asset',
+  CAMPAIGN: 'campaign_asset',
+  AD_GROUP: 'ad_group_asset',
+} as const;
+
+export async function mutateAssetLinkStatus(
+  cfg: AdsConfig,
+  customerId: string,
+  links: Array<{ level: keyof typeof ASSET_LINK_ENTITY; resourceName: string }>,
+  status: 'ENABLED' | 'PAUSED' | 'REMOVED',
+  validateOnly = false,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources(links.map((link) => (status === 'REMOVED'
+    ? { entity: ASSET_LINK_ENTITY[link.level], operation: 'remove', resource: link.resourceName }
+    : {
+      entity: ASSET_LINK_ENTITY[link.level],
+      operation: 'update',
+      resource: { resource_name: link.resourceName, status: enums.AssetLinkStatus[status] },
+    })) as any, validateOnly ? { validate_only: true } : undefined);
+}
+
+export interface AssetPatch {
+  finalUrl?: string;
+  linkText?: string;
+  description1?: string;
+  description2?: string;
+  calloutText?: string;
+}
+
+export function assetPatchResource(customerId: string, assetId: string, patch: AssetPatch): Record<string, unknown> {
+  const resource: Record<string, unknown> = { resource_name: ResourceNames.asset(customerId, assetId) };
+  if (patch.finalUrl !== undefined) resource.final_urls = [patch.finalUrl];
+  const sitelink: Record<string, string> = {};
+  if (patch.linkText !== undefined) sitelink.link_text = patch.linkText;
+  if (patch.description1 !== undefined) sitelink.description1 = patch.description1;
+  if (patch.description2 !== undefined) sitelink.description2 = patch.description2;
+  if (Object.keys(sitelink).length) resource.sitelink_asset = sitelink;
+  if (patch.calloutText !== undefined) resource.callout_asset = { callout_text: patch.calloutText };
+  return resource;
+}
+
+export async function updateAsset(
+  cfg: AdsConfig,
+  customerId: string,
+  assetId: string,
+  patch: AssetPatch,
+  validateOnly = false,
+): Promise<unknown> {
+  const customer = getCustomer(cfg, customerId);
+  return customer.mutateResources([{
+    entity: 'asset',
+    operation: 'update',
+    resource: assetPatchResource(customerId, assetId, patch),
+  }] as any, validateOnly ? { validate_only: true } : undefined);
+}
+
 export async function uploadImageAssetFromUrl(
   cfg: AdsConfig,
   customerId: string,

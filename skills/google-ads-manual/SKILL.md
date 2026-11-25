@@ -94,6 +94,7 @@ Print only the aggregate you need; do not `cat` the whole file back into context
 - `negative_keywords` returns campaign-level negatives. With `ad_group_id` it returns that ad group's negatives instead.
 - `type` filters the channel, ad or asset type. For keywords it filters the match type (EXACT, PHRASE, BROAD).
 - `status` takes TRUE or FALSE for `ad_asset_links`.
+- `asset_links` lists where assets are linked at account, campaign and ad group level (link status, field type, sitelink/callout text, final URL, campaign/ad group status, clicks and cost over 30 days). `asset_id` narrows to one asset, `type` to a field type (SITELINK), `url_contains` matches the final URL case-insensitively (GAQL cannot `LIKE` a repeated field, so the plugin filters). REMOVED links are hidden unless `status: REMOVED`. Links without traffic are listed with zeros.
 - It fetches up to 5000 rows (50,000 with `output: "file"`). `limit` is the top-N shown, and the header says `capped at N` when the fetch hit the cap.
 
 `execute_gaql` with `format: json` returns raw rows that are several times
@@ -196,6 +197,26 @@ cannot fix delivery there.
   Then `prepare_campaign_assets` (or `prepare_ad_group_assets`) links them with
   the matching `field_type`: SITELINK, CALLOUT, CALL, STRUCTURED_SNIPPET, or
   AD_IMAGE for image extensions in Search.
+- **Account level.** `prepare_campaign_assets` with `customer: true` instead of
+  `campaign_id` links assets to the account. They serve in every campaign that
+  has no enabled assets of that type of its own.
+- **Retire or pause.** `prepare_asset_link_status` takes an `asset_id` and a
+  scope (`customer`, `campaign_ids`, `ad_group_ids`); with no scope it changes
+  every link of the asset, including ones in paused campaigns that nobody
+  listed. Start with `list_ads_entities(asset_links, asset_id or url_contains)`
+  to see where the asset lives. A link already in the target status is skipped;
+  a REMOVED link cannot be re-enabled (link the asset again instead). The
+  preview counts enabled links of the same type left at each place and warns
+  below 2 sitelinks/callouts, or when nothing at all will serve. Assets
+  themselves cannot be deleted in Google Ads; unlinking everywhere is the delete.
+  Prefer PAUSED when the change may be undone.
+- **Edit in place.** `prepare_asset_update` changes a sitelink's URL, text or
+  description pair, or a callout's text. It applies wherever the asset is
+  linked (the preview lists every place) and statistics stay with the asset ID.
+  Text and image assets are immutable; replace them with a new asset and swap
+  the links (create, link, then unlink the old one, in one `prepare_batch`).
+- **Dry run.** Both tools run the change with `validate_only` before issuing a
+  token, so an API rejection costs a retry, not a confirmation.
 - **Structured snippet headers** must be predefined Google values, e.g. Brands,
   Types, Services, Destinations, Courses, Styles, Amenities.
 - **PMax asset groups** need their core creatives at creation

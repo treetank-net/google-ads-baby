@@ -211,7 +211,7 @@ Read:
 - `get_build_context` — One call before building: campaigns, ad groups, enabled conversion actions, reusable image assets
 - `get_campaigns` — Campaigns with performance metrics, including zero-activity ones (REMOVED excluded)
 - `list_accounts` — List accessible Google Ads accounts with their currency
-- `list_ads_entities` — List campaigns, ad groups, ads, keywords, negatives, assets or ad-asset links, with filters
+- `list_ads_entities` — List campaigns, ad groups, ads, keywords, negatives, assets, ad_asset_links or asset_links (with 30d metrics)
 
 Read-only analysis (review loops — findings + suggested follow-up task + possible `prepare_*` actions; never mutate):
 
@@ -269,9 +269,11 @@ Write preparation — assets & extensions:
 - `prepare_asset_group_listing_groups` — Create a Performance Max listing group tree
 - `prepare_asset_group_signals` — Add search-theme or audience signals to a Performance Max asset group
 - `prepare_asset_group` — Create a paused Performance Max asset group with its core assets
+- `prepare_asset_link_status` — Pause, enable or unlink an asset at account, campaign or ad group level; no scope = every link
+- `prepare_asset_update` — Edit a sitelink or callout in place; applies wherever it is linked
 - `prepare_call_asset` — Create a call asset; link it with prepare_campaign_assets (CALL)
 - `prepare_callout_assets` — Create callout assets; link them with prepare_campaign_assets (CALLOUT)
-- `prepare_campaign_assets` — Link existing assets to a campaign
+- `prepare_campaign_assets` — Link existing assets to a campaign, or at account level with customer: true
 - `prepare_image_asset_from_file` — Upload an image asset from a local file
 - `prepare_image_asset_from_url` — Upload an image asset from a public URL
 - `prepare_sitelink_assets` — Create sitelink assets; link them with prepare_campaign_assets (SITELINK)

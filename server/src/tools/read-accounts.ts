@@ -21,6 +21,7 @@ import {
   buildCampaignMetricsQuery,
   mergeCampaignMetrics,
 } from './read-helpers.js';
+import { loadAssetLinks, filterLinksByUrl, assetLinkTableRows, ASSET_LINK_METRICS_DAYS } from './asset-links.js';
 
 export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
   server.tool(
@@ -150,14 +151,16 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
 
   server.tool(
     'list_ads_entities',
-    'List campaigns, ad groups, ads, keywords, negatives, assets or ad-asset links, with filters. No metrics.',
+    'List campaigns, ad groups, ads, keywords, negatives, assets, ad_asset_links or asset_links (with 30d metrics).',
     {
       customer_id: z.string(),
       entity: entitySchema.describe('negative_keywords are campaign-level unless ad_group_id is given'),
       campaign_id: z.string().optional(),
       ad_group_id: z.string().optional(),
       status: upperTokenSchema.optional().describe('e.g. ENABLED, PAUSED; TRUE/FALSE for ad_asset_links'),
-      type: upperTokenSchema.optional().describe('Channel, ad or asset type; match type for keywords'),
+      type: upperTokenSchema.optional().describe('Channel, ad or asset type; match type for keywords; field type for asset_links'),
+      asset_id: z.string().optional(),
+      url_contains: z.string().min(1).max(200).optional().describe('asset_links: final URL substring'),
       subtype: upperTokenSchema.optional().describe('Channel subtype, e.g. DISPLAY_GMAIL_AD'),
       name_contains: z.string().min(1).max(120).optional().describe('Case-sensitive substring of the name or keyword text'),
       fields: shapeSchemas.fields,
@@ -175,6 +178,28 @@ export function registerAccountReadTools(server: McpServer, cfg: AdsConfig) {
       try {
         const cid = normalizeCustomerId(input.customer_id);
         const fetchLimit = output === 'file' ? FILE_FETCH_LIMIT : MAX_FETCH_LIMIT;
+        if (input.entity === 'asset_links') {
+          const [links, currency] = await Promise.all([
+            loadAssetLinks(cfg, cid, {
+              assetIds: input.asset_id ? [input.asset_id] : undefined,
+              fieldTypes: input.type ? [input.type] : undefined,
+              campaignIds: input.campaign_id ? [input.campaign_id] : undefined,
+              adGroupIds: input.ad_group_id ? [input.ad_group_id] : undefined,
+              status: input.status,
+            }, { metrics: true, limit: fetchLimit }),
+            getAccountCurrency(cfg, cid),
+          ]);
+          const matched = filterLinksByUrl(links, input.url_contains);
+          const text = tableDocument({
+            title: 'asset_links',
+            scope: [`customer ${cid}`, `last ${ASSET_LINK_METRICS_DAYS}d`, ...(input.status ? [] : ['REMOVED links hidden'])],
+            currency,
+            rows: assetLinkTableRows(matched),
+            shape: { fields, order_by, limit, page, page_chars, output },
+            extraNotes: links.length >= fetchLimit ? [`capped at ${fetchLimit} rows per level; narrow with asset_id, type or campaign_id`] : [],
+          });
+          return { content: [{ type: 'text', text }] };
+        }
         const rows = await executeGaql(cfg, cid, buildListQuery({ ...input, limit: fetchLimit }, fetchLimit)) as unknown[];
         const needsCurrency = input.entity === 'ad_groups' || input.entity === 'keywords';
         const currency = needsCurrency ? await getAccountCurrency(cfg, cid) : undefined;

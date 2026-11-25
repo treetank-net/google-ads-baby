@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.26.0
+
+### Added
+- **`list_ads_entities(asset_links)`**: where assets are linked at account, campaign and ad group level, with link status, field type, sitelink/callout text, final URL, campaign/ad group status and 30-day clicks and cost. New `asset_id` filter (also for `assets` and `ad_asset_links`) and `url_contains` (case-insensitive, filtered by the plugin because GAQL cannot `LIKE` a repeated field). Links without traffic are listed with zeros; REMOVED links are hidden by default.
+- **`prepare_asset_link_status`** (manage): pause, enable or unlink an asset at account, campaign or ad group level in one atomic request. Takes `asset_id` plus an optional scope (`customer`, `campaign_ids`, `ad_group_ids`); without a scope it changes every link of the asset. Links already in the target status are skipped, removed links cannot be re-enabled. The preview shows readable names, 30-day traffic and how many enabled links of the same type stay at each place, warning below 2 sitelinks/callouts or when nothing will serve.
+- **`prepare_asset_update`** (manage): edit a sitelink (URL, link text, description pair) or a callout text in place; the preview lists every place the asset is linked.
+- **`prepare_campaign_assets` with `customer: true`** links assets at account level.
+- Both new prepare tools run the change as a `validate_only` dry run before issuing a token, so an API rejection costs a retry, not a confirmation.
+
+### Changed
+- The `manage` profile now includes the two asset edit tools (43 tools); `full` has 67.
+
 ## v0.25.0
 
 ### Added

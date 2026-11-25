@@ -3,6 +3,7 @@ import type { AdsConfig } from '../config.js';
 import { executeGaql } from '../client.js';
 import { BATCH_ACTION, createToken, getTokenTtlSeconds, listPending } from '../confirm.js';
 import { normalizeCustomerId, normalizeResourceId, requireCustomerId } from '../validation.js';
+import { formatMutationError } from './write-executor.js';
 import {
   MAX_IMAGE_BYTES,
   CODEX_HOOK_INSTALL_COMMAND,
@@ -25,6 +26,15 @@ export {
   resolveAmountLimits,
   amountFieldDescription,
 } from './amounts.js';
+
+export async function dryRunError(run: () => Promise<unknown>): Promise<string | null> {
+  try {
+    await run();
+    return null;
+  } catch (err) {
+    return `Google Ads rejected the change in a validate_only dry run, nothing was queued: ${formatMutationError(err)}`;
+  }
+}
 
 export function validationResult(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }] };

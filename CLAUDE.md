@@ -33,6 +33,7 @@ client/
 tools/
   profile.ts              — GOOGLE_ADS_BABY_PROFILE: TOOL_PROFILE map, withProfile() gate, profileNotice()
   amounts.ts              — waluta i kwoty: CURRENCY_UNIT_SCALE, resolveAmountLimits()/loadAmountLimits(), formatAmount()/formatUnits(), amountToMicros(), konfigurowalne capy
+  asset-links.ts          — powiązania assetów (customer/campaign/ad_group_asset): buildery GAQL, parsowanie z dekodowaniem enumów, metryki doklejane osobnym zapytaniem, filtr URL, planLinkStatusChange(), linkCoverageLines(); współdzielone przez list_ads_entities(asset_links) i prepare_asset_link_status
   targeting.ts            — resolveTargeting(): kody ISO kraju/języka → criterion IDs, cache w procesie, walidacja targetable
   auth.ts                 — OAuth flow (auth_google_ads, setup_google_auth)
   read.ts                 — orchestrator: registerReadTools()
@@ -46,7 +47,7 @@ tools/
   write-helpers.ts        — validation, image inspection, preview formatting
   write-executor.ts       — executeMutation() dispatcher, formatMutationError()
   write-prepare-campaigns.ts — prepare_campaign_status, prepare_campaign_update, prepare_budget_change, prepare_search/display/pmax_campaign, prepare_ad_group, prepare_ad_group_update, prepare_demographic_bid_modifier, prepare_campaign_conversion_goals, prepare_campaign_shared_set, prepare_ad_schedule, etc.
-  write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets
+  write-prepare-assets.ts — prepare_image_asset_*, prepare_sitelink/callout/call/snippet_assets, prepare_campaign/ad_group/asset_group_assets, prepare_asset_link_status, prepare_asset_update
   write-prepare-ads.ts    — prepare_responsive_search/display_ad, prepare_clone_entity, prepare_keywords, prepare_keyword_status, prepare_ad_status, prepare_ad_update
   write-confirm.ts        — get_safety_setup, confirm_safe_word, prepare_batch, discard_pending_mutations, unfold_batch, confirm_mutation, confirm_all_mutations
 ```
@@ -136,6 +137,18 @@ kosztował 16 150 tokenów w JSON i 2 715 w TSV.
 - Stare `toTsv()`/`tsvDocument()` (`format.ts`) zostały tylko w toolach analitycznych.
 
 JSON zostaje dla struktur semantycznych, nie tabelarycznych: `findings`, `preview`, `get_ad_blueprint`.
+
+**Assety: CRUD rozbity na asset i powiązanie:**
+Google Ads nie pozwala usunąć assetu (`AssetOperation` ma tylko `create`/`update`), więc „delete" to
+odpięcie wszędzie: `prepare_asset_link_status` (ENABLED/PAUSED/REMOVED na `customer_asset`,
+`campaign_asset`, `ad_group_asset` jednym atomowym `mutateResources`). Wejście to `asset_id` + zakres,
+nie ręcznie składane `{campaign}~{asset}~{field_type}`, bo zły `field_type` celuje w nieistniejące
+powiązanie. Bez zakresu zmiana obejmuje **każde** powiązanie — na BG sitelink do wygaszenia siedział
+w dwóch wstrzymanych kampaniach, których zgłaszający nie wymienił. `prepare_asset_update` edytuje
+w miejscu tylko to, co proto nie oznacza `IMMUTABLE` (sitelink, callout, `final_urls`); text/image
+asset podmienia się nowym assetem. Oba toole robią dry run `validate_only` przed tokenem
+(`dryRunError()` w `write-helpers.ts`). Metryki powiązań idą osobnym zapytaniem (`segments.date`
+gubi powiązania bez ruchu — z 7 zostawały 4).
 
 **Kwoty tylko w walucie konta — nigdy „PLN" na sztywno:**
 Micros z Google Ads są w walucie konta, a MCC ma konta w EUR/CZK/HUF. Zahardkodowane „500 PLN"
@@ -309,7 +322,7 @@ Env vars (set in plugin.json, sourced from user's environment) OR saved in `conf
 - `GOOGLE_ADS_DEVELOPER_TOKEN` — Google Ads API developer token
 - `GOOGLE_ADS_MCC_ID` — top-level MCC account ID
 - `GOOGLE_ADS_SAFETY_LEVEL` — `standard` (default), `strict`, or `off`
-- `GOOGLE_ADS_BABY_PROFILE` — `read` (default, 15 tools: read + diagnostics + history, zero mutations), `manage` (41 tools: edits to existing entities, no creation/assets/composites), `full` (65 tools). Manifest ~2 100 / 5 800 / 12 100 tokens; unknown value falls back to `read`. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
+- `GOOGLE_ADS_BABY_PROFILE` — `read` (default, 15 tools: read + diagnostics + history, zero mutations), `manage` (43 tools: edits to existing entities incl. asset links and in-place asset edits, no creation/composites), `full` (67 tools). Manifest ~2 100 / 5 800 / 12 100 tokens; unknown value falls back to `read`. Matters in Codex, Cursor and Claude Desktop, which load every schema up front; Claude Code defers MCP schemas, so the saving there is near zero.
 - `GOOGLE_ADS_MUTATION_TOKEN_TTL_SECONDS` — optional server-side mutation token TTL override
 - `GOOGLE_ADS_CONFIRM_STATE_TTL_SECONDS` — optional Claude hook confirmation-state TTL override
 - `GOOGLE_ADS_MAX_DAILY_BUDGET` / `GOOGLE_ADS_MAX_CPC` / `GOOGLE_ADS_MAX_TARGET_CPA` — capy w jednostkach waluty konta. Ustawione = brane dosłownie (bez skalowania). Nieustawione = domyślne 500/50/500 przemnożone przez `CURRENCY_UNIT_SCALE`.

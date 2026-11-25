@@ -92,6 +92,21 @@ import { PLUGIN_VERSION } from '../src/constants.js';
 import { mkdtempSync, readFileSync } from 'fs';
 import { toTsv, tsvDocument, decodeCell, shortenResourceName, trimPrecision, paginate, pageNote, flattenRow, DEFAULT_PAGE_CHARS } from '../src/tools/format.js';
 import {
+  ASSET_LINK_LEVELS,
+  assetLinkLevels,
+  buildAssetLinkQuery,
+  buildAssetLinkMetricsQuery,
+  parseAssetLinkRows,
+  mergeAssetLinkMetrics,
+  filterLinksByUrl,
+  planLinkStatusChange,
+  linkCoverageLines,
+  assetLinkTableRows,
+  type AssetLink,
+} from '../src/tools/asset-links.js';
+import { assetPatchError, assetEditState } from '../src/tools/write-prepare-assets.js';
+import { assetPatchResource } from '../src/client/assets.js';
+import {
   buildAdBlueprint,
   buildListQuery,
   buildCampaignStructureQuery,
@@ -438,7 +453,9 @@ function testProfiles() {
   assert('manage keeps the confirm kernel', ['confirm_mutation', 'confirm_all_mutations', 'confirm_safe_word', 'get_safety_setup'].every((n) => n in manage));
   assert('manage excludes the composite builders', !Object.keys(manage).some((n) => n.endsWith('_full')));
   assert('manage excludes creation tools', !('prepare_search_campaign' in manage) && !('prepare_ad_group' in manage) && !('prepare_responsive_search_ad' in manage));
-  assert('manage excludes asset tools', !Object.keys(manage).some((n) => n.includes('asset')));
+  const assetEditTools = ['prepare_asset_link_status', 'prepare_asset_update'];
+  assert('manage keeps the asset edit tools', assetEditTools.every((n) => n in manage));
+  assert('manage excludes asset creation and linking', !Object.keys(manage).some((n) => n.includes('asset') && !assetEditTools.includes(n)));
   assert('manage excludes cloning', !('prepare_clone_entity' in manage));
 
   assert('a manage-level tool is allowed under full', isToolAllowed('prepare_budget_change', 'full'));
@@ -941,7 +958,7 @@ function testEntityQueries() {
   assert('an ad group id switches negatives to the ad group level', adGroupNegatives.includes('FROM ad_group_criterion'));
   assert('ad group negatives select only negatives', adGroupNegatives.includes('ad_group_criterion.negative = true'));
 
-  for (const entity of ['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links'] as const) {
+  for (const entity of ['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links', 'asset_links'] as const) {
     const query = buildListQuery({ entity });
     assert(`${entity} query is generated`, typeof query === 'string' && query.includes('SELECT'));
     assert(`${entity} query has no OR`, !query.includes(' OR '));
@@ -1331,6 +1348,136 @@ function testTargeting() {
   }
 }
 
+function bgSitelinkRows() {
+  const campaign = (id: number, name: string, status: number, channel: number) => ({ id, name, status, advertising_channel_type: channel });
+  const asset = { id: 146366905224, type: 'SITELINK', final_urls: ['https://tfc.trans.eu/bg/Radar-za-tovari/'], sitelink_asset: { link_text: 'Oферти за транспорт' } };
+  const link = (campaignId: number, status: number) => ({
+    resource_name: `customers/3036821335/campaignAssets/${campaignId}~146366905224~SITELINK`,
+    field_type: 'SITELINK',
+    status,
+  });
+  return [
+    { campaign: campaign(20795611366, 'BG Generic', 2, 2), asset, campaign_asset: link(20795611366, 2) },
+    { campaign: campaign(21004217668, 'BG Competitors', 2, 2), asset, campaign_asset: link(21004217668, 2) },
+    { campaign: campaign(21160100594, 'BG Old', 2, 2), asset, campaign_asset: link(21160100594, 3) },
+    { campaign: campaign(21269539387, 'BG Video', 3, 6), asset, campaign_asset: link(21269539387, 2) },
+    { campaign: campaign(21322657327, 'BG Prevoz', 2, 2), asset, campaign_asset: link(21322657327, 2) },
+    { campaign: campaign(21355000758, 'BG Demand Gen', 3, 14), asset, campaign_asset: link(21355000758, 2) },
+    { campaign: campaign(21506073565, 'BG Brand', 2, 2), asset, campaign_asset: link(21506073565, 2) },
+  ];
+}
+
+function sitelink(level: AssetLink['level'], assetId: string, where: { campaignId?: string; adGroupId?: string }, status = 'ENABLED'): AssetLink {
+  const target = level === 'CUSTOMER' ? '' : level === 'CAMPAIGN' ? `campaignAssets/${where.campaignId}~` : `adGroupAssets/${where.adGroupId}~`;
+  return {
+    level,
+    resourceName: level === 'CUSTOMER' ? `customers/1/customerAssets/${assetId}~SITELINK` : `customers/1/${target}${assetId}~SITELINK`,
+    status,
+    fieldType: 'SITELINK',
+    assetId,
+    assetType: 'SITELINK',
+    label: `link ${assetId}`,
+    finalUrls: [],
+    campaignId: where.campaignId,
+    campaignName: where.campaignId ? `Campaign ${where.campaignId}` : undefined,
+    adGroupId: where.adGroupId,
+    adGroupName: where.adGroupId ? `Ad group ${where.adGroupId}` : undefined,
+  };
+}
+
+function testAssetLinks() {
+  console.log('\n--- Asset links (list, status, coverage, in-place edit) ---');
+
+  for (const level of ASSET_LINK_LEVELS) {
+    const structure = buildAssetLinkQuery(level, { assetIds: ['146366905224'], fieldTypes: ['SITELINK'], campaignIds: ['77'] });
+    assert(`${level} link query has no OR`, !structure.includes(' OR '));
+    assert(`${level} link query carries no date segment`, !structure.includes('segments.date'));
+    assert(`${level} link query hides REMOVED links by default`, structure.includes(".status != 'REMOVED'"));
+    assert(`${level} metrics query windows by date`, buildAssetLinkMetricsQuery(level, {}).includes('segments.date DURING LAST_30_DAYS'));
+  }
+  assert('the account level never gets a campaign filter', !buildAssetLinkQuery('CUSTOMER', { campaignIds: ['77'] }).includes('campaign.id'));
+  assert('the ad group level filters by campaign', buildAssetLinkQuery('AD_GROUP', { campaignIds: ['77'] }).includes('campaign.id IN (77)'));
+  assert('includeRemoved lifts the REMOVED filter', !buildAssetLinkQuery('CAMPAIGN', { includeRemoved: true }).includes('REMOVED'));
+  assert('an explicit status replaces the default filter', buildAssetLinkQuery('CAMPAIGN', { status: 'PAUSED' }).includes("campaign_asset.status = 'PAUSED'"));
+  assert('a campaign scope drops the account level', !assetLinkLevels({ campaignIds: ['1'] }).includes('CUSTOMER'));
+  assert('an ad group scope reads only ad group links', assetLinkLevels({ adGroupIds: ['1'] }).join() === 'AD_GROUP');
+
+  const links = parseAssetLinkRows('CAMPAIGN', bgSitelinkRows());
+  assert('numeric link status decodes to a name', links[0].status === 'ENABLED' && links[2].status === 'REMOVED');
+  assert('campaign status and channel decode', links[3].campaignStatus === 'PAUSED' && links[3].channel === 'VIDEO');
+  assert('the sitelink text becomes the label', links[0].label === 'Oферти за транспорт');
+  const numericField = parseAssetLinkRows('CAMPAIGN', [{ campaign: { id: 1 }, asset: { id: 2, type: 5 }, campaign_asset: { resource_name: 'x', field_type: 13, status: 4 } }])[0];
+  assert('numeric field type and asset type decode', numericField.fieldType === 'SITELINK' && numericField.assetType === 'TEXT' && numericField.status === 'PAUSED', JSON.stringify(numericField));
+
+  const withMetrics = mergeAssetLinkMetrics(links, 'CAMPAIGN', [
+    { campaign_asset: { resource_name: links[0].resourceName }, metrics: { clicks: 300, cost_micros: 1_000_000 } },
+    { campaign_asset: { resource_name: links[0].resourceName }, metrics: { clicks: 5, cost_micros: 500_000 } },
+  ]);
+  assert('a link without traffic survives the metrics join', withMetrics.length === links.length && withMetrics[1].clicks === 0);
+  assert('metrics rows for one link are summed', withMetrics[0].clicks === 305 && withMetrics[0].costMicros === 1_500_000);
+  const table = assetLinkTableRows(withMetrics);
+  assert('the table reports cost in currency, not micros', table.some((row) => row.cost === 1.5));
+
+  assert('the URL filter is case-insensitive', filterLinksByUrl(links, 'radar-ZA').length === links.length);
+  assert('the URL filter drops non-matching links', filterLinksByUrl(links, 'blog').length === 0);
+
+  const requested = ['20795611366', '21004217668', '21160100594', '21322657327', '21506073565'];
+  const plan = planLinkStatusChange(links, { campaignIds: requested }, 'REMOVED');
+  assert('the requested campaigns resolve to four live links', plan.changes.length === 4, plan.changes.map((l) => l.campaignId).join());
+  assert('an already removed link is skipped, not an error', plan.skipped.length === 1 && plan.skipped[0].link.campaignId === '21160100594');
+  assert('every requested campaign was found', plan.missing.length === 0);
+  const everywhere = planLinkStatusChange(links, {}, 'REMOVED');
+  assert('no scope reaches the links nobody listed', everywhere.changes.length === 6 && everywhere.changes.some((l) => l.channel === 'DEMAND_GEN'));
+  assert('a campaign without the link is reported missing', planLinkStatusChange(links, { campaignIds: ['999'] }, 'PAUSED').missing.join() === 'campaign 999');
+  assert('the account link is reported missing when absent', planLinkStatusChange(links, { customer: true }, 'PAUSED').missing.join() === 'account');
+  const revive = planLinkStatusChange(links, { campaignIds: ['21160100594'] }, 'ENABLED');
+  assert('a removed link cannot be re-enabled', revive.blocked.length === 1 && revive.changes.length === 0);
+
+  const target = sitelink('CAMPAIGN', '9', { campaignId: '10' });
+  const thin = sitelink('CAMPAIGN', '9', { campaignId: '20' });
+  const bare = sitelink('CAMPAIGN', '9', { campaignId: '30' });
+  const siblings = [
+    target, sitelink('CAMPAIGN', '1', { campaignId: '10' }), sitelink('CAMPAIGN', '2', { campaignId: '10' }),
+    thin, sitelink('CAMPAIGN', '1', { campaignId: '20' }),
+    bare,
+  ];
+  const coverage = linkCoverageLines([target, thin, bare], siblings, 'REMOVED');
+  assert('a campaign keeping two sitelinks gets no warning', coverage[0].includes('3 → 2') && !coverage[0].includes('WARNING'), coverage[0]);
+  assert('dropping below two sitelinks warns', coverage[1].includes('2 → 1') && coverage[1].includes('WARNING'), coverage[1]);
+  assert('zero left and no account sitelinks warns that none serve', coverage[2].includes('1 → 0') && coverage[2].includes('no sitelinks will serve'), coverage[2]);
+  const withAccount = linkCoverageLines([bare], [bare, sitelink('CUSTOMER', '5', {})], 'REMOVED');
+  assert('zero left falls back to account-level sitelinks', withAccount[0].includes('account-level sitelinks (1 enabled) will serve instead'), withAccount[0]);
+  const enabling = linkCoverageLines([sitelink('CAMPAIGN', '9', { campaignId: '40' }, 'PAUSED')], [], 'ENABLED');
+  assert('enabling a link counts it in', enabling[0].includes('0 → 1'), enabling[0]);
+
+  const sitelinkState = assetEditState({ type: 11, final_urls: ['https://a'], sitelink_asset: { link_text: 'A', description1: 'x', description2: 'y' } });
+  assert('the edit state decodes a numeric asset type', sitelinkState.type === 'SITELINK');
+  assert('callout text is refused on a sitelink', assetPatchError('SITELINK', { callout_text: 'x' }, sitelinkState)?.includes('CALLOUT') === true);
+  assert('clearing one sitelink description alone is refused', assetPatchError('SITELINK', { description1: '' }, sitelinkState)?.includes('pairs') === true);
+  assert('clearing both descriptions is allowed', assetPatchError('SITELINK', { description1: '', description2: '' }, sitelinkState) === null);
+  assert('a URL edit on a sitelink is allowed', assetPatchError('SITELINK', { final_url: 'https://b' }, sitelinkState) === null);
+  assert('a URL edit on a callout is refused', assetPatchError('CALLOUT', { final_url: 'https://b' }, assetEditState({ type: 'CALLOUT' })) !== null);
+  assert('image assets are not editable in place', assetPatchError('IMAGE', {}, assetEditState({ type: 'IMAGE' }))?.includes('swap the links') === true);
+
+  const resource = assetPatchResource('1', '2', { finalUrl: 'https://b', linkText: 'B' }) as any;
+  assert('the patch touches only the given fields', resource.final_urls[0] === 'https://b' && resource.sitelink_asset.link_text === 'B' && !('description1' in resource.sitelink_asset) && !('callout_asset' in resource));
+}
+
+async function testAssetToolValidation() {
+  console.log('\n--- Asset tool validation (no network) ---');
+
+  const tools = registeredWriteTools();
+  const neither = resultText(await tools['prepare_campaign_assets'].handler({ customer_id: '1234567890', assets: [{ asset_id: '1', field_type: 'SITELINK' }], safe_word: 'smoke' }, {}));
+  assert('campaign assets need a campaign or an explicit account level', neither.startsWith('Error:') && neither.includes('customer: true'), neither);
+  const both = resultText(await tools['prepare_campaign_assets'].handler({ customer_id: '1234567890', campaign_id: '5', customer: true, assets: [{ asset_id: '1', field_type: 'SITELINK' }], safe_word: 'smoke' }, {}));
+  assert('a campaign and the account level at once is refused', both.startsWith('Error:'), both);
+  const account = resultText(await tools['prepare_campaign_assets'].handler({ customer_id: '1234567890', customer: true, assets: [{ asset_id: '1', field_type: 'SITELINK' }], safe_word: 'smoke' }, {}));
+  assert('customer: true prepares an account-level link', account.includes('at account level') && account.includes('token:'), account);
+  discardTokens();
+  const empty = resultText(await tools['prepare_asset_update'].handler({ customer_id: '1234567890', asset_id: '1', safe_word: 'smoke' }, {}));
+  assert('an asset update needs at least one field', empty.startsWith('Error:') && empty.includes('at least one field'), empty);
+}
+
 async function main() {
   console.log('Smoke test: google-ads-baby MCP server\n');
 
@@ -1358,6 +1505,8 @@ async function main() {
   testToolContract();
   testBatchTokens();
   testTargeting();
+  testAssetLinks();
+  await testAssetToolValidation();
   await testCapEnforcement();
 
   console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);

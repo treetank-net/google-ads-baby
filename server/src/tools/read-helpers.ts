@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { buildAssetLinkQuery } from './asset-links.js';
 import { normalizeResourceId } from '../validation.js';
 import { decodeCell, decodeEnumsDeep, shortenResourceName } from './format.js';
 
-export const entitySchema = z.enum(['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links']);
+export const entitySchema = z.enum(['campaigns', 'ad_groups', 'ads', 'keywords', 'negative_keywords', 'assets', 'ad_asset_links', 'asset_links']);
 export const upperTokenSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'Use a Google Ads enum value, e.g. ENABLED, PAUSED, SEARCH, RESPONSIVE_DISPLAY_AD');
 
 export type AdBlueprintInput = {
@@ -291,6 +292,7 @@ export function buildListQuery(input: {
   type?: string;
   subtype?: string;
   name_contains?: string;
+  asset_id?: string;
   limit?: number;
 }, maxLimit = MAX_FETCH_LIMIT) {
   const filters: string[] = [];
@@ -449,6 +451,7 @@ export function buildListQuery(input: {
       `;
 
     case 'assets':
+      if (input.asset_id) filters.push(`asset.id = ${normalizeResourceId(input.asset_id)}`);
       if (input.type) filters.push(`asset.type = '${input.type}'`);
       if (input.name_contains) filters.push(`asset.name LIKE '%${gaqlString(input.name_contains)}%'`);
       return `
@@ -469,6 +472,14 @@ export function buildListQuery(input: {
         LIMIT ${limit}
       `;
 
+    case 'asset_links':
+      return buildAssetLinkQuery('CAMPAIGN', {
+        assetIds: input.asset_id ? [input.asset_id] : undefined,
+        campaignIds: input.campaign_id ? [input.campaign_id] : undefined,
+        fieldTypes: input.type ? [input.type] : undefined,
+        status: input.status,
+      }, limit);
+
     case 'ad_asset_links':
       addCommonFilters(filters, input, {
         type: 'asset.type',
@@ -478,6 +489,7 @@ export function buildListQuery(input: {
         filters.push(`ad_group_ad_asset_view.enabled = ${input.status.toLowerCase()}`);
       }
       if (input.name_contains) filters.push(`asset.name LIKE '%${gaqlString(input.name_contains)}%'`);
+      if (input.asset_id) filters.push(`asset.id = ${normalizeResourceId(input.asset_id)}`);
       return `
         SELECT
           campaign.id,

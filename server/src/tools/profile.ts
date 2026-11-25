@@ -46,6 +46,8 @@ export const TOOL_PROFILE: Record<string, ToolProfile> = {
   prepare_negative_topics: 'manage',
   prepare_remove_ad_group_criterion: 'manage',
   prepare_campaign_removal: 'manage',
+  prepare_asset_link_status: 'manage',
+  prepare_asset_update: 'manage',
   list_pending_mutations: 'manage',
 
   prepare_search_campaign: 'full',
